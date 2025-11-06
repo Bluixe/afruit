@@ -402,10 +402,12 @@ class TrajectoryPreprocessor:
         """加载模拟器数据"""
         states = source.get("states", np.random.random((10, 100, 5)))
         actions = source.get("actions", np.random.random((10, 100, 2)))
+        rewards = source.get("rewards", np.zeros((10, 100)))
         timestamps = source.get("timestamps", np.arange(100).reshape(10, 10))
         return {
             "states": np.array(states),
             "actions": np.array(actions),
+            "rewards": np.array(rewards),
             "timestamps": np.array(timestamps)
         }
     
@@ -413,10 +415,12 @@ class TrajectoryPreprocessor:
         """加载传感器数据"""
         states = source.get("states", np.random.random((10, 100, 5)))
         actions = source.get("actions", np.random.random((10, 100, 2)))
+        rewards = source.get("rewards", np.zeros((10, 100)))
         timestamps = source.get("timestamps", np.arange(100).reshape(10, 10))
         return {
             "states": np.array(states),
             "actions": np.array(actions),
+            "rewards": np.array(rewards),
             "timestamps": np.array(timestamps)
         }
     
@@ -425,10 +429,12 @@ class TrajectoryPreprocessor:
         """加载数据库数据"""
         states = source.get("states", np.random.random((10, 100, 5)))
         actions = source.get("actions", np.random.random((10, 100, 2)))
+        rewards = source.get("rewards", np.zeros((10, 100)))
         timestamps = source.get("timestamps", np.arange(100).reshape(10, 10))
         return {
             "states": np.array(states),
             "actions": np.array(actions),
+            "rewards": np.array(rewards),
             "timestamps": np.array(timestamps)
         }
     

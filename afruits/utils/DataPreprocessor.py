@@ -15,9 +15,11 @@ class DataPreprocessor:
     - 时间序列对齐：内置RMSE, DTW等量化评估指标
     """
     
-    def __init__(self):
+    def __init__(self, target_freq: float = 1, norm_method: str = "zscore", filter_type: str = "kalman"):
         """初始化数据预处理器"""
-        pass
+        self.target_freq = target_freq
+        self.norm_method = norm_method
+        self.filter_type = filter_type
     
     def load_data(self, raw_data: Dict, timestamp: List[float] = None, 
                  position: List[Tuple[float, float, float]] = None,
@@ -69,14 +71,14 @@ class DataPreprocessor:
         
         return dict_formatted
     
-    def outlier_processing(self, data: Dict, threshold: float = 3.0, 
+    def outlier_processing(self, data: Dict, threshold: float = -1, 
                           strategy: str = 'remove') -> Tuple[Dict, List]:
         """
         异常值检测函数
         
         参数:
             data (Dict): 输入数据字典
-            threshold (float, optional): 异常值判定阈值，默认为3.0
+            threshold (float, optional): 异常值判定阈值
             strategy (str, optional): 处理策略，可选值为 'remove' 或 'interpolate'
         
         返回值:
@@ -90,9 +92,13 @@ class DataPreprocessor:
         # 初始化结果
         processed_data = data.copy()
         outliers = []
+        if threshold <= 0:
+            return processed_data, outliers
         
         # 对数据进行异常检测
         for key, values in data.items():
+            if key == 'ref_timestamps':
+                continue
             if isinstance(values, np.ndarray) and values.size > 0:
                 # 计算中位数
                 median = np.median(values, axis=0)
@@ -148,6 +154,9 @@ class DataPreprocessor:
         """
         # 初始化结果
         aligned_data = {}
+
+        if not ref_timestamps or len(ref_timestamps) == 0:
+            return data
         
         # 转换参考时间戳为numpy数组
         ref_timestamps = np.array(ref_timestamps)
@@ -220,8 +229,6 @@ class DataPreprocessor:
             return data[sensor_list[0]]
         
         # 多传感器融合
-        # 这里应该实现卡尔曼滤波或其他融合算法
-        # 简单示例：取平均值
         for key in data[sensor_list[0]].keys():
             # 收集所有传感器的对应数据
             sensor_values = []
@@ -246,7 +253,7 @@ class DataPreprocessor:
         
         return fused_data
     
-    def normalize_data(self, data: Dict, feature_ranges: Dict = None) -> Dict:
+    def normalize_data(self, data: Dict, norm_method: str = "zscore", feature_ranges: Dict = None) -> Dict:
         """
         数据标准化处理函数
         

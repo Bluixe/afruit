@@ -129,30 +129,30 @@ class AlgorithmAPI:
             # 使用数据预处理器处理数据
             processed_data = self.data_preprocessor.load_data(raw_data)
             
-            # 如果有异常值处理配置
-            if preprocess_config and 'outlier_threshold' in preprocess_config:
-                processed_data, outliers = self.data_preprocessor.outlier_processing(
-                    processed_data, 
-                    threshold=preprocess_config.get('outlier_threshold', 3.0),
-                    strategy=preprocess_config.get('outlier_strategy', 'remove')
+            processed_data, outliers = self.data_preprocessor.outlier_processing(
+                processed_data, 
+                threshold=preprocess_config.get('outlier_threshold', 3.0),
+                strategy=preprocess_config.get('outlier_strategy', 'remove')
+            )
+            self.logger.info(f"异常值处理完成")
+            
+            processed_data = self.data_preprocessor.time_alignment(
+                processed_data.get('ref_timestamps', None),
+                processed_data,
+                alignment_mode=preprocess_config.get('alignment_mode', 'linear')
+            )
+            self.logger.info("时间序列对齐完成")
+
+            if preprocess_config.get('sensor_list', None):
+                processed_data = self.data_preprocessor.sensor_fusion(
+                    preprocess_config.get('sensor_list', []),
+                    processed_data,
                 )
-                self.logger.info(f"异常值处理完成，检测到 {len(outliers)} 个异常点")
+                self.logger.info("传感器数据融合完成")
             
-            # 如果有时间对齐配置
-            if preprocess_config and 'time_alignment' in preprocess_config:
-                if 'ref_timestamps' in processed_data:
-                    processed_data = self.data_preprocessor.time_alignment(
-                        processed_data['ref_timestamps'],
-                        processed_data,
-                        alignment_mode=preprocess_config.get('alignment_mode', 'linear')
-                    )
-                    self.logger.info("时间序列对齐完成")
-            
-            # 如果有数据标准化配置
-            if preprocess_config and 'normalize' in preprocess_config and preprocess_config['normalize']:
-                feature_ranges = preprocess_config.get('feature_ranges', None)
-                processed_data = self.data_preprocessor.normalize_data(processed_data, feature_ranges)
-                self.logger.info("数据标准化完成")
+            feature_ranges = preprocess_config.get('feature_ranges', None)
+            processed_data = self.data_preprocessor.normalize_data(processed_data, feature_ranges)
+            self.logger.info("数据标准化完成")
             
             self.logger.info("数据预处理完成")
             return processed_data

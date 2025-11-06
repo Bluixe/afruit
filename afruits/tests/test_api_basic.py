@@ -44,7 +44,8 @@ class TestAPIBasic(unittest.TestCase):
         
         # 配置预处理参数
         preprocess_config = {
-            'normalize': True
+            'outlier_threshold': 3.0,
+            "alignment_mode": "linear"
         }
         
         # 预处理数据
@@ -88,15 +89,18 @@ class TestAPIBasic(unittest.TestCase):
     
     def create_simple_trajectories(self):
         """创建简单的轨迹数据"""
-        # 创建3条轨迹，每条轨迹包含20个时间步
-        num_trajectories = 3
-        trajectory_length = 20
+        # 创建20条轨迹，每条轨迹包含200个时间步
+        num_trajectories = 20
+        trajectory_length = 200
         state_dim = 5
         action_dim = 2
         
         # 创建数据字典
         data = {
-            'trajectories': []
+            'states': [],
+            "actions": [],
+            "rewards": [],
+            "timestamps": [],
         }
         
         for i in range(num_trajectories):
@@ -109,12 +113,14 @@ class TestAPIBasic(unittest.TestCase):
             # 创建奖励序列
             rewards = np.random.rand(trajectory_length)
             
-            # 添加到轨迹列表
-            data['trajectories'].append({
-                'states': states,
-                'actions': actions,
-                'rewards': rewards
-            })
+            # 创建时间戳序列（假设每个时间步间隔为0.1秒）
+            timestamps = np.array([0.1 * j for j in range(trajectory_length)])
+            
+            # 添加到数据字典
+            data['states'].append(states)
+            data['actions'].append(actions)
+            data['rewards'].append(rewards)
+            data['timestamps'].append(timestamps)
         
         return data
 
