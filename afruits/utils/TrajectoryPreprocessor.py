@@ -46,7 +46,7 @@ class TrajectoryPreprocessor:
         # 元数据记录：记录数据源类型与来集参数
         self.metadata = {}
         
-    def load_data(self, data_sources: List, source_type: str = "simulator") -> Dict:
+    def load_data(self, data_sources: List|Dict, source_type: str = "simulator") -> Dict:
         """
         数据加载：加载原始轨迹数据
         
@@ -69,17 +69,17 @@ class TrajectoryPreprocessor:
         timestamps_list = []
         
         # 根据数据源类型处理数据加载
-        for source in data_sources:
+        for source in source_type:
             # 这里简化处理，实际应用中需要根据不同数据源类型实现具体的加载逻辑
             if source_type == "simulator":
                 # 模拟器数据加载逻辑
-                data = self._load_simulator_data(source)
+                data = self._load_simulator_data(data_sources)
             elif source_type == "sensor":
                 # 传感器数据加载逻辑
-                data = self._load_sensor_data(source)
+                data = self._load_sensor_data(data_sources)
             elif source_type == "database":
                 # 数据库数据加载逻辑
-                data = self._load_database_data(source)
+                data = self._load_database_data(data_sources)
             
             # 提取数据
             states_list.append(data["states"])
@@ -400,10 +400,16 @@ class TrajectoryPreprocessor:
     # 辅助方法
     def _load_simulator_data(self, source):
         """加载模拟器数据"""
-        states = source.get("states", np.random.random((10, 100, 5)))
-        actions = source.get("actions", np.random.random((10, 100, 2)))
-        rewards = source.get("rewards", np.zeros((10, 100)))
-        timestamps = source.get("timestamps", np.arange(100).reshape(10, 10))
+        if isinstance(source, dict):
+            data = source
+        else:
+            # 从json文件中读取数据
+            data = pd.read_json(source)
+
+        states = data.get("states", np.random.random((10, 100, 5)))
+        actions = data.get("actions", np.random.random((10, 100, 2)))
+        rewards = data.get("rewards", np.zeros((10, 100)))
+        timestamps = data.get("timestamps", np.arange(100).reshape(10, 10))
         return {
             "states": np.array(states),
             "actions": np.array(actions),
@@ -413,10 +419,16 @@ class TrajectoryPreprocessor:
     
     def _load_sensor_data(self, source):
         """加载传感器数据"""
-        states = source.get("states", np.random.random((10, 100, 5)))
-        actions = source.get("actions", np.random.random((10, 100, 2)))
-        rewards = source.get("rewards", np.zeros((10, 100)))
-        timestamps = source.get("timestamps", np.arange(100).reshape(10, 10))
+        if isinstance(source, dict):
+            data = source
+        else:
+            # 从json文件中读取数据
+            data = pd.read_json(source)
+
+        states = data.get("states", np.random.random((10, 100, 5)))
+        actions = data.get("actions", np.random.random((10, 100, 2)))
+        rewards = data.get("rewards", np.zeros((10, 100)))
+        timestamps = data.get("timestamps", np.arange(100).reshape(10, 10))
         return {
             "states": np.array(states),
             "actions": np.array(actions),
@@ -427,10 +439,16 @@ class TrajectoryPreprocessor:
     
     def _load_database_data(self, source):
         """加载数据库数据"""
-        states = source.get("states", np.random.random((10, 100, 5)))
-        actions = source.get("actions", np.random.random((10, 100, 2)))
-        rewards = source.get("rewards", np.zeros((10, 100)))
-        timestamps = source.get("timestamps", np.arange(100).reshape(10, 10))
+        if isinstance(source, dict):
+            data = source
+        else:
+            # 从json文件中读取数据
+            data = pd.read_json(source)
+
+        states = data.get("states", np.random.random((10, 100, 5)))
+        actions = data.get("actions", np.random.random((10, 100, 2)))
+        rewards = data.get("rewards", np.zeros((10, 100)))
+        timestamps = data.get("timestamps", np.arange(100).reshape(10, 10))
         return {
             "states": np.array(states),
             "actions": np.array(actions),
