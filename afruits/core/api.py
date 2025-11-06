@@ -9,33 +9,33 @@ from typing import Dict, List, Tuple, Union, Optional, Any
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # 导入工具模块
-from utils.DataPreprocessor import DataPreprocessor
-from utils.TrajectoryPreprocessor import TrajectoryPreprocessor
-from utils.OflineEvaluator import OfflineEvaluator
-from utils.MultiMetricEvaluator import MultiMetricEvaluator
+from afruits.utils.DataPreprocessor import DataPreprocessor
+from afruits.utils.TrajectoryPreprocessor import TrajectoryPreprocessor
+from afruits.utils.OflineEvaluator import OfflineEvaluator
+from afruits.utils.MultiMetricEvaluator import MultiMetricEvaluator
 
 # 导入基础算法模块
-from utils.BehaviorCloner import BehaviorCloner
-from utils.AdversarialImitationLearner import AdversarialImitationLearner
-from utils.OfflineRLearner import OfflineRLearner
-from utils.OfflineFSPLearner import OfflineFSPLearner
+from afruits.utils.BehaviorCloner import BehaviorCloner
+from afruits.utils.AdversarialImitationLearner import AdversarialImitationLearner
+from afruits.utils.OfflineRLearner import OfflineRLearner
+from afruits.utils.OfflineFSPLearner import OfflineFSPLearner
 
 # 导入轨迹建模与生成模型
-from utils.AutoencoderModel import AutoencoderModel
-from utils.TransformerModel import TransformerModel
-from utils.DiffusionTrajGenerator import DiffusionTrajGenerator
-from utils.VAETrajGenerator import VAETrajGenerator
+from afruits.utils.AutoencoderModel import AutoencoderModel
+from afruits.utils.TransformerModel import TransformerModel
+from afruits.utils.DiffusionTrajGenerator import DiffusionTrajGenerator
+from afruits.utils.VAETrajGenerator import VAETrajGenerator
 
 # 导入训练方法模块
-from utils.EvolutionaryLearner import EvolutionaryLearner
-from utils.IncrementalLearner import IncrementalLearner
-from utils.FineTuneManager import FineTuneManager
+from afruits.utils.EvolutionaryLearner import EvolutionaryLearner
+from afruits.utils.IncrementalLearner import IncrementalLearner
+from afruits.utils.FineTuneManager import FineTuneManager
 
 # 导入服务层模块
-from core.services.game_modeling_service import GameModelingService
-from core.services.imitation_learning_service import ImitationLearningService
-from core.services.visualization_service import VisualizationService
-from core.services.logging_service import LoggingService
+from afruits.core.services.game_modeling_service import GameModelingService
+from afruits.core.services.imitation_learning_service import ImitationLearningService
+from afruits.core.services.visualization_service import VisualizationService
+from afruits.core.services.logging_service import LoggingService
 
 class AlgorithmAPI:
     """
@@ -175,11 +175,34 @@ class AlgorithmAPI:
         self.logger.info("开始轨迹数据预处理")
         
         try:
-            # 使用轨迹预处理器处理数据
-            processed_trajectories = self.trajectory_preprocessor.process_trajectories(
-                trajectories,
-                config=preprocess_config
-            )
+            # 使用数据预处理器处理数据
+            processed_data = self.trajectory_preprocessor.load_data(trajectories)
+            processed_data = self.trajectory_preprocessor.format_unification(processed_data)
+            
+            # 如果有异常值处理配置
+            if preprocess_config and 'format' in preprocess_config:
+                processed_data, outliers = self.trajectory_preprocessor.outlier_processing(
+                    processed_data, 
+                    threshold=preprocess_config.get('outlier_threshold', 3.0),
+                    strategy=preprocess_config.get('outlier_strategy', 'remove')
+                )
+                self.logger.info(f"异常值处理完成，检测到 {len(outliers)} 个异常点")
+            
+            # 如果有时间对齐配置
+            if preprocess_config and 'time_alignment' in preprocess_config:
+                if 'ref_timestamps' in processed_data:
+                    processed_data = self.trajectory_preprocessor.time_alignment(
+                        processed_data['ref_timestamps'],
+                        processed_data,
+                        alignment_mode=preprocess_config.get('alignment_mode', 'linear')
+                    )
+                    self.logger.info("时间序列对齐完成")
+            
+            # 如果有数据标准化配置
+            if preprocess_config and 'normalize' in preprocess_config and preprocess_config['normalize']:
+                feature_ranges = preprocess_config.get('feature_ranges', None)
+                processed_data = self.trajectory_preprocessor.normalize_data(processed_data, feature_ranges)
+                self.logger.info("数据标准化完成")
             
             self.logger.info("轨迹数据预处理完成")
             return processed_trajectories

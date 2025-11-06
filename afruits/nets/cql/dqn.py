@@ -5,7 +5,7 @@ import numpy as np
 import torch
 
 from tianshou.data import Batch, ReplayBuffer, to_numpy, to_torch_as
-from tianshou.policy import BasePolicy
+from afruits.nets.cql.base import BasePolicy
 
 
 class DQNPolicy(BasePolicy):

@@ -5,7 +5,7 @@ from typing import Dict, List, Tuple, Union, Optional, Any
 import os
 import time
 import matplotlib.pyplot as plt
-from sklearn.decomposition import PCA, TSNE
+from sklearn.decomposition import PCA
 from sklearn.manifold import TSNE
 import seaborn as sns
 from mpl_toolkits.mplot3d import Axes3D

@@ -103,13 +103,12 @@ class TrajectoryPreprocessor:
         
         return raw_dataset
     
-    def format_unification(self, raw_dataset: Dict, schema_config: Dict = None) -> Dict:
+    def format_unification(self, raw_dataset: Dict) -> Dict:
         """
         格式标准化：统一不同来源数据的格式
         
         参数:
             raw_dataset (Dict): 原始数据集
-            schema_config (Dict): 目标字段映射规则
             
         返回:
             standardized_data (Dict): 标准化数据
@@ -117,14 +116,6 @@ class TrajectoryPreprocessor:
                 - aligned_actions: 对齐后的动作矩阵
                 - meta_info: 标准化元数据标签
         """
-        if schema_config is None:
-            # 默认配置
-            schema_config = {
-                "state_fields": ["position", "velocity", "orientation"],
-                "action_fields": ["linear_vel", "angular_vel"],
-                "time_field": "timestamp"
-            }
-        
         # 数据标准化处理
         if self.norm_method == "minmax":
             # Min-Max标准化
@@ -383,31 +374,38 @@ class TrajectoryPreprocessor:
     # 辅助方法
     def _load_simulator_data(self, source):
         """加载模拟器数据"""
-        # 实际应用中需要实现具体的加载逻辑
-        # 这里仅作为示例
+        states = source.get("states", np.random.random((10, 100, 5)))
+        actions = source.get("actions", np.random.random((10, 100, 2)))
+        timestamps = source.get("timestamps", np.arange(100).reshape(10, 10))
         return {
-            "states": np.random.random((10, 100, 5)),
-            "actions": np.random.random((10, 100, 2)),
-            "timestamps": np.arange(100).reshape(10, 10)
+            "states": np.array(states),
+            "actions": np.array(actions),
+            "timestamps": np.array(timestamps)
         }
     
     def _load_sensor_data(self, source):
         """加载传感器数据"""
-        # 实际应用中需要实现具体的加载逻辑
+        states = source.get("states", np.random.random((10, 100, 5)))
+        actions = source.get("actions", np.random.random((10, 100, 2)))
+        timestamps = source.get("timestamps", np.arange(100).reshape(10, 10))
         return {
-            "states": np.random.random((10, 100, 5)),
-            "actions": np.random.random((10, 100, 2)),
-            "timestamps": np.arange(100).reshape(10, 10)
+            "states": np.array(states),
+            "actions": np.array(actions),
+            "timestamps": np.array(timestamps)
         }
+    
     
     def _load_database_data(self, source):
         """加载数据库数据"""
-        # 实际应用中需要实现具体的加载逻辑
+        states = source.get("states", np.random.random((10, 100, 5)))
+        actions = source.get("actions", np.random.random((10, 100, 2)))
+        timestamps = source.get("timestamps", np.arange(100).reshape(10, 10))
         return {
-            "states": np.random.random((10, 100, 5)),
-            "actions": np.random.random((10, 100, 2)),
-            "timestamps": np.arange(100).reshape(10, 10)
+            "states": np.array(states),
+            "actions": np.array(actions),
+            "timestamps": np.array(timestamps)
         }
+    
     
     def _minmax_normalize(self, data):
         """Min-Max标准化"""

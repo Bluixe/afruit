@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import numpy as np
-from FineTuneManager import FineTuneManager
+from afruits.utils.FineTuneManager import FineTuneManager
 
 # 创建一个简单的测试模型
 class SimpleModel(nn.Module):

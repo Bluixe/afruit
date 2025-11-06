@@ -8,7 +8,7 @@ import unittest
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # 导入API
-from core.api import AlgorithmAPI
+from afruits.core.api import AlgorithmAPI
 
 class TestAPIBasic(unittest.TestCase):
     """
