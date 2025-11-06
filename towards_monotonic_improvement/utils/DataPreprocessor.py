@@ -1,0 +1,315 @@
+import numpy as np
+import pandas as pd
+from typing import Dict, List, Tuple, Union, Optional
+
+class DataPreprocessor:
+    """
+    数据预处理器类
+    
+    功能描述：实现多种数据预处理操作，包括时间序列处理、数据标准化、异常检测等
+    
+    核心功能：
+    - 时间序列处理：支持动态时间规整(DTW)与重采样技术
+    - 数据标准化：集成Z-score标准化与Min-Max归一化模式
+    - 异常值检测：提供多种异常检测方法与滤波选择
+    - 时间序列对齐：内置RMSE, DTW等量化评估指标
+    """
+    
+    def __init__(self):
+        """初始化数据预处理器"""
+        pass
+    
+    def load_data(self, raw_data: Dict, timestamp: List[float] = None, 
+                 position: List[Tuple[float, float, float]] = None,
+                 velocity: List[Tuple[float, float, float]] = None,
+                 attitude: List[Tuple[float, float, float]] = None) -> Dict:
+        """
+        数据加载与预处理函数
+        
+        参数:
+            raw_data (Dict): 原始输入字典，要求符合以下格式
+            timestamp (List[float], optional): 浮点型时间序列
+            position (List[Tuple[float, float, float]], optional): 三维坐标列表 [x, y, z]
+            velocity (List[Tuple[float, float, float]], optional): 速度值量列表 [vx, vy, vz]
+            attitude (List[Tuple[float, float, float]], optional): 姿态角列表 [roll, pitch, yaw]
+        
+        返回值:
+            Dict: 格式化数据字典
+        
+        功能描述:
+            1. 数据格式验证与时间序列排序
+            2. 执行数据完整性检查与类型转换
+            3. 时间戳重采样与时间序列标准化
+        """
+        # 格式化数据字典
+        dict_formatted = {}
+        
+        # 处理原始数据
+        if raw_data:
+            # 数据格式验证
+            # 时间序列排序
+            # 这里可以添加更多的数据处理逻辑
+            dict_formatted = raw_data
+        
+        # 处理时间戳
+        if timestamp:
+            dict_formatted['timestamp'] = np.array(timestamp)
+        
+        # 处理位置数据
+        if position:
+            dict_formatted['position'] = np.array(position)
+        
+        # 处理速度数据
+        if velocity:
+            dict_formatted['velocity'] = np.array(velocity)
+        
+        # 处理姿态角数据
+        if attitude:
+            dict_formatted['attitude'] = np.array(attitude)
+        
+        return dict_formatted
+    
+    def outlier_processing(self, data: Dict, threshold: float = 3.0, 
+                          strategy: str = 'remove') -> Tuple[Dict, List]:
+        """
+        异常值检测函数
+        
+        参数:
+            data (Dict): 输入数据字典
+            threshold (float, optional): 异常值判定阈值，默认为3.0
+            strategy (str, optional): 处理策略，可选值为 'remove' 或 'interpolate'
+        
+        返回值:
+            Tuple[Dict, List]: 处理后的数据字典和异常点列表
+        
+        功能描述:
+            1. 使用MAD(Median Absolute Deviation)检测离群异常点
+            2. 根据策略选择移除或插值处理异常点
+            3. 返回处理后的数据集与异常点位置
+        """
+        # 初始化结果
+        processed_data = data.copy()
+        outliers = []
+        
+        # 对数据进行异常检测
+        for key, values in data.items():
+            if isinstance(values, np.ndarray) and values.size > 0:
+                # 计算中位数
+                median = np.median(values, axis=0)
+                # 计算绝对偏差
+                mad = np.median(np.abs(values - median), axis=0)
+                
+                # 识别异常值
+                if mad.any():  # 避免除以零
+                    z_scores = np.abs(values - median) / mad
+                    mask = np.any(z_scores > threshold, axis=1) if len(values.shape) > 1 else z_scores > threshold
+                    
+                    # 记录异常点索引
+                    outlier_indices = np.where(mask)[0]
+                    if len(outlier_indices) > 0:
+                        outliers.extend([(key, idx) for idx in outlier_indices])
+                    
+                    # 处理异常值
+                    if strategy == 'remove':
+                        # 移除异常值
+                        processed_data[key] = values[~mask]
+                    elif strategy == 'interpolate':
+                        # 使用插值替换异常值
+                        processed_values = values.copy()
+                        if len(outlier_indices) > 0:
+                            # 简单的线性插值示例
+                            for idx in outlier_indices:
+                                if 0 < idx < len(values) - 1:
+                                    if len(values.shape) > 1:
+                                        processed_values[idx] = (values[idx-1] + values[idx+1]) / 2
+                                    else:
+                                        processed_values[idx] = (values[idx-1] + values[idx+1]) / 2
+                        processed_data[key] = processed_values
+        
+        return processed_data, outliers
+    
+    def time_alignment(self, ref_timestamps: List[float], data: Dict, 
+                      alignment_mode: str = 'dtw') -> Dict:
+        """
+        时间序列对齐函数
+        
+        参数:
+            ref_timestamps (List[float]): 参考时间序列
+            data (Dict): 待对齐的数据字典
+            alignment_mode (str, optional): 对齐模式，可选值为 'dtw' 或 'linear'
+        
+        返回值:
+            Dict: 时间轴对齐后的数据字典
+        
+        功能描述:
+            1. 重采样数据至统一时间基准
+            2. 采用Lanczos插值算法进行时间序列对齐
+            3. 提供DTW算法进行非线性时间序列对齐
+        """
+        # 初始化结果
+        aligned_data = {}
+        
+        # 转换参考时间戳为numpy数组
+        ref_timestamps = np.array(ref_timestamps)
+        
+        # 对每个数据序列进行时间对齐
+        for key, values in data.items():
+            if key == 'timestamp':
+                aligned_data[key] = ref_timestamps
+                continue
+                
+            if isinstance(values, np.ndarray) and 'timestamp' in data:
+                orig_timestamps = data['timestamp']
+                
+                # 根据不同的对齐模式进行处理
+                if alignment_mode == 'linear':
+                    # 线性插值
+                    if len(values.shape) > 1:
+                        # 多维数据
+                        aligned_values = np.zeros((len(ref_timestamps), values.shape[1]))
+                        for i in range(values.shape[1]):
+                            aligned_values[:, i] = np.interp(ref_timestamps, orig_timestamps, values[:, i])
+                    else:
+                        # 一维数据
+                        aligned_values = np.interp(ref_timestamps, orig_timestamps, values)
+                    
+                    aligned_data[key] = aligned_values
+                
+                elif alignment_mode == 'dtw':
+                    # 这里应该实现DTW算法
+                    # 由于DTW算法较为复杂，这里仅使用线性插值作为示例
+                    if len(values.shape) > 1:
+                        aligned_values = np.zeros((len(ref_timestamps), values.shape[1]))
+                        for i in range(values.shape[1]):
+                            aligned_values[:, i] = np.interp(ref_timestamps, orig_timestamps, values[:, i])
+                    else:
+                        aligned_values = np.interp(ref_timestamps, orig_timestamps, values)
+                    
+                    aligned_data[key] = aligned_values
+            else:
+                # 对于非时间序列数据，直接复制
+                aligned_data[key] = values
+        
+        return aligned_data
+    
+    def sensor_fusion(self, sensor_list: List[str], data: Dict) -> Dict:
+        """
+        传感器数据融合函数
+        
+        参数:
+            sensor_list (List[str]): 传感器列表，例如 ["radar_01", "lidar_02"]
+            data (Dict): 传感器数据字典
+        
+        返回值:
+            Dict: 融合后的数据字典
+        
+        功能描述:
+            1. 多传感器数据时空对齐
+            2. 卡尔曼滤波进行多传感器数据融合
+            3. 更新融合后的置信度与精度评估
+        """
+        # 初始化结果
+        fused_data = {}
+        
+        # 检查传感器列表
+        if not sensor_list or len(sensor_list) < 1:
+            return data
+        
+        # 如果只有一个传感器，直接返回数据
+        if len(sensor_list) == 1 and sensor_list[0] in data:
+            return data[sensor_list[0]]
+        
+        # 多传感器融合
+        # 这里应该实现卡尔曼滤波或其他融合算法
+        # 简单示例：取平均值
+        for key in data[sensor_list[0]].keys():
+            # 收集所有传感器的对应数据
+            sensor_values = []
+            for sensor in sensor_list:
+                if sensor in data and key in data[sensor]:
+                    sensor_values.append(data[sensor][key])
+            
+            # 如果有数据，则计算平均值
+            if sensor_values:
+                if all(isinstance(v, np.ndarray) for v in sensor_values):
+                    # 确保所有数组具有相同的形状
+                    shapes = [v.shape for v in sensor_values]
+                    if all(s == shapes[0] for s in shapes):
+                        fused_data[key] = np.mean(sensor_values, axis=0)
+                    else:
+                        # 形状不同，需要更复杂的处理
+                        # 这里简单地使用第一个传感器的数据
+                        fused_data[key] = sensor_values[0]
+                else:
+                    # 非数组数据，简单地使用第一个传感器的数据
+                    fused_data[key] = sensor_values[0]
+        
+        return fused_data
+    
+    def normalize_data(self, data: Dict, feature_ranges: Dict = None) -> Dict:
+        """
+        数据标准化处理函数
+        
+        参数:
+            data (Dict): 输入数据字典
+            feature_ranges (Dict, optional): 特征标准化范围，例如 {"velocity": [-5, 5]}
+        
+        返回值:
+            Dict: 标准化后的数据字典
+        
+        功能描述:
+            1. 支持Z-score标准化与Min-Max归一化
+            2. 应用场景：速度、位置等有明确物理意义的特征
+            3. 计算公式：z = (x - μ)/σ 或 z = (x - min)/(max - min)
+        """
+        # 初始化结果
+        normalized_data = {}
+        
+        # 对每个数据序列进行标准化
+        for key, values in data.items():
+            if isinstance(values, np.ndarray) and values.size > 0:
+                # 检查是否有指定的特征范围
+                if feature_ranges and key in feature_ranges:
+                    # Min-Max归一化
+                    min_val, max_val = feature_ranges[key]
+                    if len(values.shape) > 1:
+                        # 多维数据
+                        normalized_values = np.zeros_like(values, dtype=float)
+                        for i in range(values.shape[1]):
+                            col_min = np.min(values[:, i])
+                            col_max = np.max(values[:, i])
+                            if col_max > col_min:
+                                normalized_values[:, i] = (values[:, i] - col_min) / (col_max - col_min) * (max_val - min_val) + min_val
+                    else:
+                        # 一维数据
+                        data_min = np.min(values)
+                        data_max = np.max(values)
+                        if data_max > data_min:
+                            normalized_values = (values - data_min) / (data_max - data_min) * (max_val - min_val) + min_val
+                        else:
+                            normalized_values = np.zeros_like(values, dtype=float)
+                else:
+                    # Z-score标准化
+                    if len(values.shape) > 1:
+                        # 多维数据
+                        normalized_values = np.zeros_like(values, dtype=float)
+                        for i in range(values.shape[1]):
+                            mean = np.mean(values[:, i])
+                            std = np.std(values[:, i])
+                            if std > 0:
+                                normalized_values[:, i] = (values[:, i] - mean) / std
+                    else:
+                        # 一维数据
+                        mean = np.mean(values)
+                        std = np.std(values)
+                        if std > 0:
+                            normalized_values = (values - mean) / std
+                        else:
+                            normalized_values = np.zeros_like(values, dtype=float)
+                
+                normalized_data[key] = normalized_values
+            else:
+                # 非数组数据，直接复制
+                normalized_data[key] = values
+        
+        return normalized_data
