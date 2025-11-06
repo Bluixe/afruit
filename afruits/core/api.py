@@ -177,35 +177,48 @@ class AlgorithmAPI:
         try:
             # 使用数据预处理器处理数据
             processed_data = self.trajectory_preprocessor.load_data(trajectories)
+
             processed_data = self.trajectory_preprocessor.format_unification(processed_data)
+            self.logger.info("轨迹数据格式统一完成")
             
             # 如果有异常值处理配置
-            if preprocess_config and 'format' in preprocess_config:
-                processed_data, outliers = self.trajectory_preprocessor.outlier_processing(
+            if preprocess_config and 'min_length' in preprocess_config:
+                processed_data = self.trajectory_preprocessor.segment_trajs(
                     processed_data, 
-                    threshold=preprocess_config.get('outlier_threshold', 3.0),
-                    strategy=preprocess_config.get('outlier_strategy', 'remove')
+                    min_length=preprocess_config.get('min_length', 10),
                 )
-                self.logger.info(f"异常值处理完成，检测到 {len(outliers)} 个异常点")
+                self.logger.info("轨迹分段完成")
             
             # 如果有时间对齐配置
-            if preprocess_config and 'time_alignment' in preprocess_config:
-                if 'ref_timestamps' in processed_data:
-                    processed_data = self.trajectory_preprocessor.time_alignment(
-                        processed_data['ref_timestamps'],
+            if preprocess_config and 'reference_clock' in preprocess_config:
+                if 'reference_clock' in processed_data:
+                    processed_data = self.trajectory_preprocessor.time_align(
                         processed_data,
-                        alignment_mode=preprocess_config.get('alignment_mode', 'linear')
+                        alignment_mode=preprocess_config.get('reference_clock', 'host')
                     )
                     self.logger.info("时间序列对齐完成")
+
+            # 如果有噪声处理
+            if preprocess_config and 'filter_type' in preprocess_config:
+                if 'filter_type' in processed_data:
+                    processed_data = self.trajectory_preprocessor.denoise(
+                        processed_data,
+                        filter_type=preprocess_config.get('filter_type', 'kalman')
+                    )
+                    self.logger.info("轨迹去噪完成")
             
-            # 如果有数据标准化配置
-            if preprocess_config and 'normalize' in preprocess_config and preprocess_config['normalize']:
-                feature_ranges = preprocess_config.get('feature_ranges', None)
-                processed_data = self.trajectory_preprocessor.normalize_data(processed_data, feature_ranges)
-                self.logger.info("数据标准化完成")
+            # 如果有数据增强
+            if preprocess_config and 'method' in preprocess_config:
+                if 'method' in processed_data:
+                    processed_data = self.trajectory_preprocessor.data_enhance(
+                        processed_data,
+                        data_num=preprocess_config.get('data_num', 0),
+                        method=preprocess_config.get('method', 'simple')
+                    )
+                    self.logger.info("轨迹去噪完成")
             
             self.logger.info("轨迹数据预处理完成")
-            return processed_trajectories
+            return processed_data
             
         except Exception as e:
             self.logger.error(f"轨迹数据预处理失败: {str(e)}")

@@ -356,18 +356,44 @@ class TrajectoryPreprocessor:
         
         # 隐空间生成
         elif "latent" in method.lower():
-            # 1. 训练VAE编码到隐空间
-            # 2. 在隐空间进行插值/扰动
-            # 3. 通过生成模型解码新轨迹
-            # 注：此处为简化实现，实际应用中需要实现VAE模型
-            for _ in range(data_num):
-                # 随机选择两个轨迹进行插值
-                traj1 = np.random.choice(trajectories)
-                traj2 = np.random.choice(trajectories)
-                # 简单线性插值作为示例
-                alpha = np.random.random()
-                new_traj = alpha * traj1 + (1 - alpha) * traj2
-                enhanced_trajectories.append(new_traj)
+            # 检查是否提供了模型保存路径
+            if save_path is None:
+                raise ValueError("使用隐空间生成方法时必须提供save_path参数")
+            
+            # 导入VAETrajGenerator
+            from afruits.utils.VAETrajGenerator import VAETrajGenerator
+            
+            # 创建VAE轨迹生成器实例
+            vae_generator = VAETrajGenerator()
+            
+            # 准备数据格式
+            # 假设轨迹数据是numpy数组列表，需要转换为适合VAE的格式
+            trajectories_array = np.array(trajectories)
+            
+            # 从save_path加载预训练的VAE模型
+            import torch
+            import os
+            
+            # 检查模型文件是否存在
+            save_path = "models"
+            model_path = os.path.join(save_path, "vae_model.pt")
+            if not os.path.exists(model_path):
+                raise FileNotFoundError(f"在{model_path}找不到VAE模型文件")
+            
+            # 加载模型参数
+            vae_generator.load_model(model_path)
+            
+            # 设置为评估模式
+            vae_generator.encoder.eval()
+            vae_generator.decoder.eval()
+            
+            # 使用VAE生成新轨迹
+            generated_data = vae_generator.generate(num_samples=data_num)
+            
+            # 将生成的轨迹添加到增强数据集
+            generated_trajectories = generated_data['trajectories']
+            for traj in generated_trajectories:
+                enhanced_trajectories.append(traj)
         
         return enhanced_trajectories
     

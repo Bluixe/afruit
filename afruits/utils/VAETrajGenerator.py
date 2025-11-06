@@ -6,6 +6,7 @@ from torch.utils.data import DataLoader, TensorDataset
 from typing import Dict, List, Tuple, Union, Optional, Any
 import os
 import time
+import json
 
 class VAETrajGenerator:
     """
@@ -425,3 +426,99 @@ class VAETrajGenerator:
                 valid_trajectories.append(traj)
         
         return valid_trajectories
+    
+    def save_model(self, save_path: str) -> None:
+        """
+        保存模型参数和配置
+        
+        参数:
+            save_path (str): 保存路径，应以.pt结尾
+        """
+        if self.encoder is None or self.decoder is None:
+            raise ValueError("模型尚未构建，请先调用build_model")
+        
+        # 确保目录存在
+        os.makedirs(os.path.dirname(os.path.abspath(save_path)), exist_ok=True)
+        
+        # 保存模型参数和配置
+        model_state = {
+            'encoder_state_dict': self.encoder.state_dict(),
+            'decoder_state_dict': self.decoder.state_dict(),
+            'optimizer_state_dict': self.optimizer.state_dict() if self.optimizer else None,
+            'scheduler_state_dict': self.scheduler.state_dict() if self.scheduler else None,
+            'config': {
+                'latent_dim': self.latent_dim,
+                'seq_length': self.seq_length,
+                'kl_weight': self.kl_weight,
+                'recon_loss_type': self.recon_loss_type,
+                'physics_constraints': self.physics_constraints
+            }
+        }
+        
+        # 保存模型
+        torch.save(model_state, save_path)
+        
+        # 保存配置信息到JSON文件（可选，便于查看）
+        config_path = os.path.splitext(save_path)[0] + '_config.json'
+        with open(config_path, 'w', encoding='utf-8') as f:
+            json.dump(model_state['config'], f, ensure_ascii=False, indent=4)
+            
+        print(f"模型已保存至: {save_path}")
+        print(f"配置已保存至: {config_path}")
+    
+    def load_model(self, load_path: str, input_dim: int = None) -> None:
+        """
+        加载模型参数和配置
+        
+        参数:
+            load_path (str): 模型文件路径，应以.pt结尾
+            input_dim (int, optional): 输入特征维度，如果为None则使用保存的配置
+        
+        返回值:
+            成功加载返回True，否则抛出异常
+        """
+        if not os.path.exists(load_path):
+            raise FileNotFoundError(f"模型文件 {load_path} 不存在")
+        
+        # 加载模型状态
+        model_state = torch.load(load_path, map_location=self.device)
+        
+        # 更新配置
+        config = model_state.get('config', {})
+        self.latent_dim = config.get('latent_dim', self.latent_dim)
+        self.seq_length = config.get('seq_length', self.seq_length)
+        self.kl_weight = config.get('kl_weight', self.kl_weight)
+        self.recon_loss_type = config.get('recon_loss_type', self.recon_loss_type)
+        self.physics_constraints = config.get('physics_constraints', self.physics_constraints)
+        
+        # 如果没有提供input_dim，尝试从模型结构推断
+        if input_dim is None:
+            # 尝试从解码器的输出层获取维度
+            decoder_dict = model_state['decoder_state_dict']
+            for key in decoder_dict:
+                if 'fc_out.weight' in key:
+                    input_dim = decoder_dict[key].size(0)
+                    break
+            
+            if input_dim is None:
+                raise ValueError("无法从模型中推断input_dim，请手动提供")
+        
+        # 构建模型
+        self.build_model(input_dim)
+        
+        # 加载模型参数
+        self.encoder.load_state_dict(model_state['encoder_state_dict'])
+        self.decoder.load_state_dict(model_state['decoder_state_dict'])
+        
+        # 加载优化器状态（如果存在）
+        if 'optimizer_state_dict' in model_state and model_state['optimizer_state_dict'] and self.optimizer:
+            self.optimizer.load_state_dict(model_state['optimizer_state_dict'])
+            
+        # 加载调度器状态（如果存在）
+        if 'scheduler_state_dict' in model_state and model_state['scheduler_state_dict'] and self.scheduler:
+            self.scheduler.load_state_dict(model_state['scheduler_state_dict'])
+            
+        print(f"模型已从 {load_path} 加载")
+        print(f"配置: latent_dim={self.latent_dim}, seq_length={self.seq_length}, kl_weight={self.kl_weight}")
+        
+        return True
