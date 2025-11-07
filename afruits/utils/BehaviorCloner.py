@@ -218,6 +218,8 @@ class BehaviorCloner:
         val_loader = DataLoader(val_dataset, batch_size=self.batch_size)
         
         # 创建模型
+        if len(X_train.shape) >= 2:
+            input_dim = X_train.shape[1] * X_train.shape[2] * X_train.shape[3] if len(X_train.shape) == 4 else X_train.shape[1] * X_train.shape[2]
         input_dim = X_train.shape[1] * X_train.shape[2]  # 展平输入特征
         output_dim = y_train.shape[1]  # 输出动作维度
         
@@ -235,8 +237,7 @@ class BehaviorCloner:
             )
         elif self.network_type == "CNN":
             # 创建CNN模型
-            # 注意：这里假设输入是图像数据，如果不是，需要调整模型结构
-            # 简化的CNN模型示例
+            assert len(X_train.shape) == 4, "CNN模式下输入数据必须为4维张量 (样本数, 通道数, 高度, 宽度)"
             self.model = nn.Sequential(
                 nn.Conv2d(X_train.shape[1], 16, kernel_size=3, stride=1, padding=1),
                 nn.ReLU(),

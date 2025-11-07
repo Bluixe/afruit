@@ -46,6 +46,7 @@ class OfflineFSPLearner:
         self.policy_network = None
         self.opponent_model = None
         self.optimizer = None
+        self.weighted = False
         
         # 初始化训练状态
         self.is_trained = False

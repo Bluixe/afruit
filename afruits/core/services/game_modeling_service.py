@@ -162,6 +162,9 @@ class GameModelingService:
             cql_weight=cql_weight,
             target_update_interval=target_update_interval
         )
+
+        # 预处理数据
+        training_data = model.preprocess_data(training_data)
         
         # 训练模型
         training_history = model.train(training_data, num_iterations=num_iterations)
@@ -199,6 +202,8 @@ class GameModelingService:
             importance_beta=importance_beta
         )
         
+        # 预处理数据
+        training_data = model.build_weighted_dataset(training_data)
         # 训练模型
         training_history = model.fictitious_play(training_data, num_iterations=num_iterations)
         

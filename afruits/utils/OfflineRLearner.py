@@ -26,8 +26,6 @@ class OfflineRLearner:
     """
     
     def __init__(self,
-                 state_dim: int = 7,
-                 action_dim: int = 7,
                  cql_weight: float = 0.5,
                  vae_hidden_dim: int = 256,
                  perturbation_scale: float = 0.05,
@@ -56,8 +54,8 @@ class OfflineRLearner:
             device (str): 训练设备，默认为"cuda"如果可用，否则为"cpu"
         """
         # 初始化参数
-        self.state_dim = state_dim
-        self.action_dim = action_dim
+        self.state_dim = None  # 需要在preprocess_data时设置
+        self.action_dim = None  # 需要在preprocess_data时设置
         self.cql_weight = cql_weight
         self.vae_hidden_dim = vae_hidden_dim
         self.perturbation_scale = perturbation_scale
@@ -135,6 +133,12 @@ class OfflineRLearner:
             states = trajectory['states']
             actions = trajectory['actions']
             rewards = trajectory['rewards']
+
+            if self.state_dim is None:
+                assert len(states.shape) == 2, "状态数据必须为二维数组 (时间步长, 状态维度)"
+                self.state_dim = states.shape[1]
+            if self.action_dim is None:
+                self.action_dim = int(np.max(actions)) + 1  # 假设动作是从0开始的整数
             
             # 检查数据长度是否匹配
             if not (len(states) == len(actions) == len(rewards)):
