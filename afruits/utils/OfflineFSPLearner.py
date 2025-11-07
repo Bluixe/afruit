@@ -271,14 +271,7 @@ class OfflineFSPLearner:
                 # 尝试获取动作维度
                 actions = dataset['actions']
                 if isinstance(actions, np.ndarray) or isinstance(actions, list):
-
-                    action_dim = actions.shape[1]
-                    # # 使用唯一值的数量作为动作维度
-                    # unique_actions = np.unique(actions)
-                    # action_dim = len(unique_actions)
-                    
-                    # # 如果动作是从0开始的连续整数，也可以使用最大值+1
-                    # if np.array_equal(unique_actions, np.arange(action_dim)):
+                    action_dim = int(max(actions) + 1)
                         
                 else:
                     # 默认动作维度

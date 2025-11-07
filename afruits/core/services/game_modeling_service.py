@@ -170,6 +170,9 @@ class GameModelingService:
 
         # 预处理数据
         training_data = model.preprocess_data(training_data)
+
+        # 构建模型
+        model.build_model()
         
         # 训练模型
         training_history = model.train(training_data)
