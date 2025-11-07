@@ -72,7 +72,7 @@ class TestBasicAlgorithm(unittest.TestCase):
         
         return trajectories
     
-    def create_game_modeling_test_data(self):
+    def create_game_modeling_test_data(self, algorithm_type='BehaviorCloner'):
         """创建博弈建模测试数据"""
         # 创建模拟的轨迹数据
         test_trajectories = []
@@ -87,7 +87,7 @@ class TestBasicAlgorithm(unittest.TestCase):
 
             if algorithm_type == 'OfflineRLearner':
                 # 离线强化学习需要单独的轨迹格式
-                trajectories[f'traj_{i}'] = {
+                test_trajectories[f'traj_{i}'] = {
                     'states': states,
                     'actions': actions,
                     'rewards': np.random.rand(20),  # 随机奖励
@@ -97,7 +97,7 @@ class TestBasicAlgorithm(unittest.TestCase):
                 }
             elif algorithm_type == 'OfflineFSPLearner':
                 # 离线自对弈需要单独的轨迹格式
-                trajectories[f'traj_{i}'] = {
+                test_trajectories[f'traj_{i}'] = {
                     'states': states,
                     'actions': actions,
                     'opponent_actions': opponent_actions,
@@ -107,7 +107,7 @@ class TestBasicAlgorithm(unittest.TestCase):
                     'infos': [{} for _ in range(20)]  # 额外信息
                 }
             else:
-                trajectories[f'traj_{i}'] = {
+                test_trajectories[f'traj_{i}'] = {
                     'states': states,
                     'actions': actions,
                     # 'opponent_actions': opponent_actions,
@@ -116,9 +116,6 @@ class TestBasicAlgorithm(unittest.TestCase):
                     'dones': np.zeros(20),  # 完成标志
                     'infos': [{} for _ in range(20)]  # 额外信息
                 }
-        
-        return trajectories
-        
         return test_trajectories
     
     #---------- 测试方法 ----------#
@@ -172,7 +169,7 @@ class TestBasicAlgorithm(unittest.TestCase):
             'method': 'offline',
             'method_type': 'IS'
         }
-        
+
         eval_result = self.api.evaluate_model(model, test_data, eval_config)
         print(f"评估结果: {eval_result}")
     

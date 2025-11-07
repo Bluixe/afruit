@@ -145,15 +145,6 @@ class GameModelingService:
         self.logger.info("训练离线强化学习模型")
         
         # 提取模型参数
-        # cql_weight: float = 0.5,
-        # vae_hidden_dim: int = 256,
-        # perturbation_scale: float = 0.05,
-        # replay_ratio: float = 0.8,
-        # num_quantiles: int = 200,
-        # discount_factor: float = 0.99,
-        # estimation_step: int = 1,
-        # target_update_freq: int = 0,
-        # reward_normalization: bool = False,
         cql_weight = model_config.get('cql_weight', 0.5)
         vae_hidden_dim = model_config.get('vae_hidden_dim', 256)
         perturbation_scale = model_config.get('perturbation_scale', 0.05)
@@ -181,7 +172,7 @@ class GameModelingService:
         training_data = model.preprocess_data(training_data)
         
         # 训练模型
-        training_history = model.train(training_data, num_iterations=num_iterations)
+        training_history = model.train(training_data)
         
         # 提取训练指标
         metrics = {
@@ -257,10 +248,10 @@ class GameModelingService:
         # 处理数据
         expert_states, expert_actions = model.preprocess_data(training_data)
         
-        # 构建模型
-        generator_args = model_config.get('generator_args', {})
-        discriminator_args = model_config.get('discriminator_args', {})
-        model.build_models(generator_args, discriminator_args)
+        # # 构建模型
+        # generator_args = model_config.get('generator_args', {})
+        # discriminator_args = model_config.get('discriminator_args', {})
+        # model.build_models(generator_args, discriminator_args)
         
         # 准备训练数据
         expert_data = {
