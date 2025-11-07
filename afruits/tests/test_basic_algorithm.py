@@ -60,7 +60,6 @@ class TestBasicAlgorithm(unittest.TestCase):
                     'infos': [{} for _ in range(20)]  # 额外信息
                 }
             else:
-            
                 trajectories[f'traj_{i}'] = {
                     'states': states,
                     'actions': actions,
@@ -78,29 +77,53 @@ class TestBasicAlgorithm(unittest.TestCase):
         # 创建模拟的轨迹数据
         test_trajectories = []
         
-        # 创建5条测试轨迹
-        for i in range(5):
-            # 每条轨迹包含10个时间步
-            states = np.random.rand(10, 10)  # 10维状态空间
-            actions = np.random.rand(10, 5)  # 5维动作空间
+        # 创建10条轨迹
+        for i in range(10):
+            # 每条轨迹包含20个时间步
+            states = np.random.rand(20, 10)  # 10维状态空间
+            actions = np.random.rand(20, 5)  # 5维动作空间
             opponent_actions = np.random.rand(20, 5)  # 对手动作
             next_states = np.random.rand(20, 10)  # 下一个状态
-            
-            test_trajectories.append({
-                'states': states,
-                'actions': actions,
-                # 'opponent_actions': opponent_actions,
-                # 'next_states': next_states,
-                'rewards': np.random.rand(10),  # 随机奖励
-                'dones': np.zeros(10),  # 完成标志
-                'infos': [{} for _ in range(10)]  # 额外信息
-            })
+
+            if algorithm_type == 'OfflineRLearner':
+                # 离线强化学习需要单独的轨迹格式
+                trajectories[f'traj_{i}'] = {
+                    'states': states,
+                    'actions': actions,
+                    'rewards': np.random.rand(20),  # 随机奖励
+                    'next_states': next_states,
+                    'dones': np.zeros(20),  # 完成标志
+                    'infos': [{} for _ in range(20)]  # 额外信息
+                }
+            elif algorithm_type == 'OfflineFSPLearner':
+                # 离线自对弈需要单独的轨迹格式
+                trajectories[f'traj_{i}'] = {
+                    'states': states,
+                    'actions': actions,
+                    'opponent_actions': opponent_actions,
+                    'next_states': next_states,
+                    'rewards': np.random.rand(20),  # 随机奖励
+                    'dones': np.zeros(20),  # 完成标志
+                    'infos': [{} for _ in range(20)]  # 额外信息
+                }
+            else:
+                trajectories[f'traj_{i}'] = {
+                    'states': states,
+                    'actions': actions,
+                    # 'opponent_actions': opponent_actions,
+                    # 'next_states': next_states,
+                    'rewards': np.random.rand(20),  # 随机奖励
+                    'dones': np.zeros(20),  # 完成标志
+                    'infos': [{} for _ in range(20)]  # 额外信息
+                }
+        
+        return trajectories
         
         return test_trajectories
     
     #---------- 测试方法 ----------#
     
-    def test_behavior_cloner(self):
+    def test_behavior_cloner(self, algorithm_type='BehaviorCloner'):
         """测试小样本博弈建模模块的行为克隆功能"""
         print("\n测试小样本博弈建模模块的行为克隆功能 (BehaviorCloner)")
         
