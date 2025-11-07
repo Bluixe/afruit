@@ -22,8 +22,6 @@ class AdversarialImitationLearner:
     """
     
     def __init__(self,
-                 state_dim: int = 7,
-                 action_dim: int = 7,
                  gen_learning_rate: float = 1e-4,
                  disc_learning_rate: float = 5e-5,
                  update_ratio: int = 5,
@@ -33,8 +31,6 @@ class AdversarialImitationLearner:
         初始化对抗模仿学习器
         
         参数:
-            state_dim (int): 状态空间维度，默认为7
-            action_dim (int): 动作空间维度，默认为7
             gen_learning_rate (float): 生成器学习率，默认为1e-4，有效取值范围1e-5~1e-3
             disc_learning_rate (float): 判别器学习率，默认为5e-5，有效取值范围1e-6~1e-4
             update_ratio (int): 更新比例，默认为5，有效取值范围1~10
@@ -42,8 +38,8 @@ class AdversarialImitationLearner:
             device (str): 训练设备，默认为"cuda"如果可用，否则为"cpu"
         """
         # 初始化参数
-        self.state_dim = state_dim
-        self.action_dim = action_dim
+        self.state_dim = None
+        self.action_dim = None
         self.gen_learning_rate = gen_learning_rate
         self.disc_learning_rate = disc_learning_rate
         self.update_ratio = update_ratio
@@ -64,14 +60,6 @@ class AdversarialImitationLearner:
     
     def _validate_params(self):
         """验证初始化参数是否合法"""
-        # 验证state_dim
-        if not isinstance(self.state_dim, int) or not (1 <= self.state_dim <= 1024):
-            raise ValueError(f"state_dim必须为1-1024范围内的整数，当前值: {self.state_dim}")
-        
-        # 验证action_dim
-        if not isinstance(self.action_dim, int) or not (1 <= self.action_dim <= 100):
-            raise ValueError(f"action_dim必须为1-100范围内的整数，当前值: {self.action_dim}")
-        
         # 验证gen_learning_rate
         if not isinstance(self.gen_learning_rate, float) or not (1e-5 <= self.gen_learning_rate <= 1e-3):
             raise ValueError(f"gen_learning_rate必须在1e-5~1e-3范围内，当前值: {self.gen_learning_rate}")
@@ -141,11 +129,13 @@ class AdversarialImitationLearner:
         print(f"数据预处理完成: expert_states shape: {expert_states.shape}, expert_actions shape: {expert_actions.shape}")
         return expert_states, expert_actions
     
-    def build_models(self, generator_args: Dict = None, discriminator_args: Dict = None) -> Tuple[nn.Module, nn.Module]:
+    def build_models(self, state_dim: int, action_dim: int, generator_args: Dict = None, discriminator_args: Dict = None) -> Tuple[nn.Module, nn.Module]:
         """
         模型构建函数
         
         参数:
+            state_dim (int): 状态空间维度
+            action_dim (int): 动作空间维度
             generator_args (Dict, optional): 生成器参数字典
             discriminator_args (Dict, optional): 判别器参数字典
         
@@ -158,6 +148,17 @@ class AdversarialImitationLearner:
             2. 构建判别器网络
             3. 设置优化器
         """
+        # 设置状态和动作维度
+        self.state_dim = state_dim
+        self.action_dim = action_dim
+        
+        # 验证状态和动作维度
+        if not isinstance(self.state_dim, int) or not (1 <= self.state_dim <= 1024):
+            raise ValueError(f"state_dim必须为1-1024范围内的整数，当前值: {self.state_dim}")
+        
+        if not isinstance(self.action_dim, int) or not (1 <= self.action_dim <= 100):
+            raise ValueError(f"action_dim必须为1-100范围内的整数，当前值: {self.action_dim}")
+        
         # 设置默认参数
         if generator_args is None:
             generator_args = {}
@@ -203,7 +204,20 @@ class AdversarialImitationLearner:
         return self.generator, self.discriminator
     
     def _build_generator(self, args: Dict) -> nn.Module:
-        """构建生成器（策略网络）"""
+        """
+        构建生成器（策略网络）
+        
+        参数:
+            args (Dict): 生成器参数字典
+        
+        返回值:
+            generator: 生成器模型
+        """
+        if self.state_dim is None:
+            raise ValueError("state_dim未设置，请先调用build_models方法")
+        if self.action_dim is None:
+            raise ValueError("action_dim未设置，请先调用build_models方法")
+            
         hidden_dim = args["hidden_dim"]
         n_layers = args["n_layers"]
         dropout = args["dropout"]
@@ -226,7 +240,20 @@ class AdversarialImitationLearner:
         return generator
     
     def _build_discriminator(self, args: Dict) -> nn.Module:
-        """构建判别器"""
+        """
+        构建判别器
+        
+        参数:
+            args (Dict): 判别器参数字典
+        
+        返回值:
+            discriminator: 判别器模型
+        """
+        if self.state_dim is None:
+            raise ValueError("state_dim未设置，请先调用build_models方法")
+        if self.action_dim is None:
+            raise ValueError("action_dim未设置，请先调用build_models方法")
+            
         hidden_dim = args["hidden_dim"]
         n_layers = args["n_layers"]
         dropout = args["dropout"]
@@ -278,7 +305,7 @@ class AdversarialImitationLearner:
         
         return gradient_penalty
     
-    def train(self, expert_data: Dict, batch_size: int = 64, epochs: int = 100) -> Dict:
+    def train(self, expert_data: Dict, batch_size: int = 64, epochs: int = 100, generator_args: Dict = None, discriminator_args: Dict = None) -> Dict:
         """
         训练函数
         
@@ -286,6 +313,8 @@ class AdversarialImitationLearner:
             expert_data (Dict): 处理后的专家数据
             batch_size (int): 训练批次大小，默认为64
             epochs (int): 训练轮次，默认为100
+            generator_args (Dict, optional): 生成器参数字典
+            discriminator_args (Dict, optional): 判别器参数字典
         
         返回值:
             Dict: 训练历史记录，包含以下指标:
@@ -299,16 +328,19 @@ class AdversarialImitationLearner:
             3. 记录训练过程中的损失值
             4. 返回训练历史记录
         """
-        # 检查模型是否已构建
-        if self.generator is None or self.discriminator is None:
-            raise ValueError("模型尚未构建，请先调用build_models方法")
-        
         # 检查输入数据
         if 'expert_states' not in expert_data or 'expert_actions' not in expert_data:
             raise ValueError("expert_data必须包含'expert_states'和'expert_actions'")
         
         expert_states = expert_data['expert_states']
         expert_actions = expert_data['expert_actions']
+        
+        # 根据输入数据的维度构建模型
+        if self.generator is None or self.discriminator is None:
+            state_dim = expert_states.shape[1]  # 状态维度
+            action_dim = expert_actions.shape[1]  # 动作维度
+            print(f"根据输入数据构建模型: state_dim={state_dim}, action_dim={action_dim}")
+            self.build_models(state_dim, action_dim, generator_args, discriminator_args)
         
         # 转换为PyTorch张量
         expert_states_tensor = torch.FloatTensor(expert_states).to(self.device)
@@ -429,6 +461,10 @@ class AdversarialImitationLearner:
         # 检查模型是否已训练
         if not self.is_trained or self.generator is None or self.discriminator is None:
             raise ValueError("模型尚未训练，请先调用train方法")
+        
+        # 检查状态和动作维度是否已设置
+        if self.state_dim is None or self.action_dim is None:
+            raise ValueError("state_dim或action_dim未设置，请先调用train方法")
         
         # 初始化评估指标
         metrics = {
@@ -578,7 +614,7 @@ class AdversarialImitationLearner:
         self.gp_lambda = checkpoint['gp_lambda']
         
         # 重建模型
-        self.build_models()
+        self.build_models(self.state_dim, self.action_dim)
         
         # 加载模型参数
         self.generator.load_state_dict(checkpoint['generator_state_dict'])

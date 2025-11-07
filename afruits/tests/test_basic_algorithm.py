@@ -135,6 +135,8 @@ class TestBasicAlgorithm(unittest.TestCase):
         # 配置模型
         model_config = {
             'model_type': 'AdversarialImitationLearner',  # 使用对抗模仿学习模型
+            'state_dim': 10,
+            'action_dim': 5,
             'gen_hidden_dim': 64,
             'disc_hidden_dim': 64,
             'gen_learning_rate': 1e-4,
