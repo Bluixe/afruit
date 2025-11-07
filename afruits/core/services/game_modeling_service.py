@@ -145,22 +145,36 @@ class GameModelingService:
         self.logger.info("训练离线强化学习模型")
         
         # 提取模型参数
-        batch_size = model_config.get('batch_size', 64)
-        network_arch = model_config.get('network_arch', [256, 256])
-        learning_rate = model_config.get('learning_rate', 3e-4)
+        # cql_weight: float = 0.5,
+        # vae_hidden_dim: int = 256,
+        # perturbation_scale: float = 0.05,
+        # replay_ratio: float = 0.8,
+        # num_quantiles: int = 200,
+        # discount_factor: float = 0.99,
+        # estimation_step: int = 1,
+        # target_update_freq: int = 0,
+        # reward_normalization: bool = False,
+        cql_weight = model_config.get('cql_weight', 0.5)
+        vae_hidden_dim = model_config.get('vae_hidden_dim', 256)
+        perturbation_scale = model_config.get('perturbation_scale', 0.05)
+        replay_ratio = model_config.get('replay_ratio', 0.8)
+        num_quantiles = model_config.get('num_quantiles', 200)
         discount_factor = model_config.get('discount_factor', 0.99)
-        cql_weight = model_config.get('cql_weight', 1.0)
-        target_update_interval = model_config.get('target_update_interval', 100)
-        num_iterations = model_config.get('num_iterations', 10000)
+        estimation_step = model_config.get('estimation_step', 1)
+        target_update_freq = model_config.get('target_update_freq', 0)
+        reward_normalization = model_config.get('reward_normalization', False)
         
         # 创建模型
         model = OfflineRLearner(
-            batch_size=batch_size,
-            network_arch=network_arch,
-            learning_rate=learning_rate,
-            discount_factor=discount_factor,
             cql_weight=cql_weight,
-            target_update_interval=target_update_interval
+            vae_hidden_dim=vae_hidden_dim,
+            perturbation_scale=perturbation_scale,
+            replay_ratio=replay_ratio,
+            num_quantiles=num_quantiles,
+            discount_factor=discount_factor,
+            estimation_step=estimation_step,
+            target_update_freq=target_update_freq,
+            reward_normalization=reward_normalization,
         )
 
         # 预处理数据

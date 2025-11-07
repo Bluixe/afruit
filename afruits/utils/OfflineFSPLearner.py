@@ -72,7 +72,7 @@ class OfflineFSPLearner:
         if not isinstance(self.importance_beta, float) or not (0.1 <= self.importance_beta <= 0.9):
             raise ValueError(f"importance_beta必须在0.1-0.9范围内，当前值: {self.importance_beta}")
     
-    def build_weighted_dataset(self, raw_trajectories: List, opponent_id: int) -> Dict:
+    def build_weighted_dataset(self, raw_trajectories: List, opponent_id: int = 0) -> Dict:
         """
         数据处理函数：构建加权数据集
         
