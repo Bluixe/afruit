@@ -359,10 +359,12 @@ class GameModelingService:
                     raise ValueError("模型未初始化")
             elif isinstance(model, OfflineRLearner):
                 # 使用离线强化学习模型预测
-                return model.policy.step(state)
+                state_tensor = torch.FloatTensor(state)
+                return model.policy.step(state_tensor, 'cpu')
             elif isinstance(model, OfflineFSPLearner):
                 # 使用离线虚构自我博弈模型预测
-                return model.policy_network(state)
+                state_tensor = torch.FloatTensor(state).to(self.device)
+                return model.policy_network(state_tensor)
             elif isinstance(model, AdversarialImitationLearner):
                 # 使用对抗模仿学习模型预测
                 state_tensor = torch.FloatTensor(state).unsqueeze(0).to(self.device)
