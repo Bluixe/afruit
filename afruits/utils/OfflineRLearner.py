@@ -151,17 +151,19 @@ class OfflineRLearner:
                 done = False
                 if i == len(states) - 2:  # 最后一个转换
                     done = True
+
+                done = torch.tensor(done, dtype=torch.long)
                 
                 # 添加到buffer
                 buffer.add(
                     Batch(
-                    obs=obs,
-                    act=act,
-                    rew=rew,
+                    obs=torch.tensor(obs).float(),
+                    act=torch.tensor(act).long(),
+                    rew=torch.tensor(rew).float(),
                     done=done,
                     terminated=done,
                     truncated=done,
-                    obs_next=obs_next,
+                    obs_next=torch.tensor(obs_next).float(),
                     info={})
                 )
         
@@ -323,10 +325,6 @@ class OfflineRLearner:
                 batch_indices = np.random.choice(len(buffer), batch_size, replace=False)
                 batch = buffer[batch_indices]
                 
-                # 转换为张量
-                states = torch.tensor(batch.obs, dtype=torch.float32).to(self.device)
-                actions = torch.tensor(batch.act, dtype=torch.long).to(self.device)
-        
             # 根据replay_ratio决定是否使用历史轨迹回放
             if np.random.random() < self.replay_ratio:
                 try:
