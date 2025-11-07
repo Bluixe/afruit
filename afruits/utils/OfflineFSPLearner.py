@@ -252,9 +252,42 @@ class OfflineFSPLearner:
             3. 策略评估进化: Top-k策略保留机制
             4. 策略池生成: 计算策略平均分布
         """
-        # 检查网络是否已构建
+        # 检查网络是否已构建，如果未构建则根据数据集构建
         if self.network is None or self.policy_network is None or self.opponent_model is None:
-            raise ValueError("网络尚未构建，请先调用build_network方法")
+            # 从数据集中获取输入维度和动作维度
+            try:
+                # 尝试获取输入维度
+                states = dataset['states']
+                if isinstance(states, np.ndarray):
+                    if len(states.shape) > 1:
+                        input_dim = states.shape[1]  # (n_samples, input_dim)
+                    else:
+                        input_dim = states[0].shape[0]  # 第一个样本的维度
+                else:
+                    # 如果不是numpy数组，尝试获取第一个元素的长度
+                    input_dim = len(states[0])
+                
+                # 尝试获取动作维度
+                actions = dataset['actions']
+                if isinstance(actions, np.ndarray) or isinstance(actions, list):
+                    # 使用唯一值的数量作为动作维度
+                    unique_actions = np.unique(actions)
+                    action_dim = len(unique_actions)
+                    
+                    # 如果动作是从0开始的连续整数，也可以使用最大值+1
+                    if np.array_equal(unique_actions, np.arange(action_dim)):
+                        action_dim = int(np.max(actions) + 1)
+                else:
+                    # 默认动作维度
+                    action_dim = 10  # 使用一个合理的默认值
+                
+                print(f"从数据集自动构建网络: 输入维度={input_dim}, 动作维度={action_dim}")
+                
+                # 调用build_network构建网络
+                self.build_network(input_dim, action_dim)
+            except Exception as e:
+                # 如果自动检测失败，抛出更详细的错误
+                raise ValueError(f"无法从数据集自动构建网络: {e}。请手动调用build_network方法。")
         
         # 检查数据集
         if not dataset or not isinstance(dataset, dict):

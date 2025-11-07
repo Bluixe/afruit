@@ -35,10 +35,14 @@ class TestBasicAlgorithm(unittest.TestCase):
             # 每条轨迹包含20个时间步
             states = np.random.rand(20, 10)  # 10维状态空间
             actions = np.random.rand(20, 5)  # 5维动作空间
+            opponent_actions = np.random.rand(20, 5)  # 对手动作
+            next_states = np.random.rand(20, 10)  # 下一个状态
             
             trajectories[f'traj_{i}'] = {
                 'states': states,
                 'actions': actions,
+                'opponent_actions': opponent_actions,
+                'next_states': next_states,
                 'rewards': np.random.rand(20),  # 随机奖励
                 'dones': np.zeros(20),  # 完成标志
                 'infos': [{} for _ in range(20)]  # 额外信息
@@ -56,10 +60,14 @@ class TestBasicAlgorithm(unittest.TestCase):
             # 每条轨迹包含10个时间步
             states = np.random.rand(10, 10)  # 10维状态空间
             actions = np.random.rand(10, 5)  # 5维动作空间
+            opponent_actions = np.random.rand(20, 5)  # 对手动作
+            next_states = np.random.rand(20, 10)  # 下一个状态
             
             test_trajectories.append({
                 'states': states,
                 'actions': actions,
+                'opponent_actions': opponent_actions,
+                'next_states': next_states,
                 'rewards': np.random.rand(10),  # 随机奖励
                 'dones': np.zeros(10),  # 完成标志
                 'infos': [{} for _ in range(10)]  # 额外信息
