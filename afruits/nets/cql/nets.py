@@ -57,24 +57,32 @@ class QValueNet(nn.Module):
         self.obs_shape = obs_space
         self.action_shape = action_space
         self.num_quantiles = num_quantiles
-        
-        self.cnn = nn.Sequential(
-            nn.Conv2d(3, 16, kernel_size=3, padding=1),
+
+        # use MLP as default core net
+        self.core_net = nn.Sequential(
+            nn.Linear(self.obs_shape, args["n_embd"]),
             nn.ReLU(),
-            nn.Conv2d(16, 16, kernel_size=3, padding=1),
-            nn.ReLU(),
-            nn.Dropout(args["dropout"]),
-            nn.Flatten(start_dim=1),
-            nn.Linear(int(16 * self.obs_shape * self.obs_shape), args["n_embd"]),
+            nn.Linear(args["n_embd"], args["n_embd"]),
             nn.ReLU(),
         )
+        
+        # self.cnn = nn.Sequential(
+        #     nn.Conv2d(3, 16, kernel_size=3, padding=1),
+        #     nn.ReLU(),
+        #     nn.Conv2d(16, 16, kernel_size=3, padding=1),
+        #     nn.ReLU(),
+        #     nn.Dropout(args["dropout"]),
+        #     nn.Flatten(start_dim=1),
+        #     nn.Linear(int(16 * self.obs_shape * self.obs_shape), args["n_embd"]),
+        #     nn.ReLU(),
+        # )
         input_size = args["n_embd"]
 
         self.output_layer = nn.Linear(input_size, self.action_shape * self.num_quantiles)
 
     def forward(self, obs, state=None, info=None):
         x = obs
-        x = self.cnn(x)
+        x = self.core_net(x)
         x = self.output_layer(x)
         x = x.view(-1, self.action_shape, self.num_quantiles)
         return x, state

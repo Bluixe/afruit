@@ -8,7 +8,7 @@ import os
 import time
 from tianshou.data import Batch, ReplayBuffer
 from nets.cql.discrete_cql import DiscreteCQLPolicy
-from nets.cql.nets import QValueNet
+from nets.cql.nets import QValueNet   
 from utils.BCQModels import VAE, DiscreteBCQPolicy
 import copy
 
