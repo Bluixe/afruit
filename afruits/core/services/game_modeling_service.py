@@ -350,7 +350,7 @@ class GameModelingService:
                 # 使用行为克隆模型预测
                 if hasattr(model, 'model') and model.model is not None:
                     # 转换为张量
-                    state_tensor = torch.FloatTensor(state).unsqueeze(0)
+                    state_tensor = torch.FloatTensor(state)
                     # 预测
                     with torch.no_grad():
                         action = model.model(state_tensor).numpy()
@@ -359,10 +359,10 @@ class GameModelingService:
                     raise ValueError("模型未初始化")
             elif isinstance(model, OfflineRLearner):
                 # 使用离线强化学习模型预测
-                return model.act(state)
+                return model.policy.step(state)
             elif isinstance(model, OfflineFSPLearner):
                 # 使用离线虚构自我博弈模型预测
-                return model.act(state)
+                return model.policy_network(state)
             elif isinstance(model, AdversarialImitationLearner):
                 # 使用对抗模仿学习模型预测
                 state_tensor = torch.FloatTensor(state).unsqueeze(0).to(self.device)
