@@ -152,14 +152,13 @@ class OfflineRLearner:
                 if i == len(states) - 2:  # 最后一个转换
                     done = True
 
-                done = torch.tensor(done, dtype=torch.long)
                 
                 # 添加到buffer
                 buffer.add(
                     Batch(
                     obs=torch.tensor(obs).float(),
                     act=torch.tensor(act).long(),
-                    rew=torch.tensor(rew).float(),
+                    rew=rew,
                     done=done,
                     terminated=done,
                     truncated=done,
