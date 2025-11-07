@@ -319,7 +319,14 @@ class OfflineRLearner:
                     history['vae_loss'].append(vae_loss.item())
                 except Exception as e:
                     print(f"VAE训练出错: {e}")
-            
+            else:
+                batch_indices = np.random.choice(len(buffer), batch_size, replace=False)
+                batch = buffer[batch_indices]
+                
+                # 转换为张量
+                states = torch.tensor(batch.obs, dtype=torch.float32).to(self.device)
+                actions = torch.tensor(batch.act, dtype=torch.long).to(self.device)
+        
             # 根据replay_ratio决定是否使用历史轨迹回放
             if np.random.random() < self.replay_ratio:
                 try:
