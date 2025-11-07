@@ -80,14 +80,6 @@ class OfflineRLearner:
     
     def _validate_params(self):
         """验证初始化参数是否合法"""
-        # 验证state_dim
-        if not isinstance(self.state_dim, int) or not (1 <= self.state_dim <= 1024):
-            raise ValueError(f"state_dim必须为1-1024范围内的整数，当前值: {self.state_dim}")
-        
-        # 验证action_dim
-        if not isinstance(self.action_dim, int) or not (1 <= self.action_dim <= 100):
-            raise ValueError(f"action_dim必须为1-100范围内的整数，当前值: {self.action_dim}")
-        
         # 验证cql_weight
         if not isinstance(self.cql_weight, float) or not (0.0 < self.cql_weight <= 10.0):
             raise ValueError(f"cql_weight必须在0.0-10.0范围内，当前值: {self.cql_weight}")

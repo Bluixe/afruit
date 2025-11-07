@@ -72,7 +72,7 @@ class OfflineFSPLearner:
         if not isinstance(self.importance_beta, float) or not (0.1 <= self.importance_beta <= 0.9):
             raise ValueError(f"importance_beta必须在0.1-0.9范围内，当前值: {self.importance_beta}")
     
-    def build_weighted_dataset(self, raw_trajectories: List, opponent_id: int = 0) -> Dict:
+    def build_weighted_dataset(self, raw_trajectories: Dict, opponent_id: int = 0) -> Dict:
         """
         数据处理函数：构建加权数据集
         
@@ -92,7 +92,7 @@ class OfflineFSPLearner:
         weighted_dataset = {}
         
         # 检查输入数据
-        if not raw_trajectories or not isinstance(raw_trajectories, list):
+        if not raw_trajectories or not isinstance(raw_trajectories, dict):
             raise ValueError("raw_trajectories必须是非空列表")
         
         # 处理轨迹数据
@@ -104,7 +104,7 @@ class OfflineFSPLearner:
         dones = []
         sample_weights = []
         
-        for trajectory in raw_trajectories:
+        for traj_id, trajectory in raw_trajectories.items():
             # 检查轨迹数据是否包含必要字段
             if not all(key in trajectory for key in ['states', 'actions', 'opponent_actions', 'rewards', 'next_states', 'dones']):
                 print("警告: 轨迹缺少必要数据字段，已跳过")
