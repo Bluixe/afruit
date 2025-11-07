@@ -329,6 +329,7 @@ class AdversarialImitationLearner:
             4. 返回训练历史记录
         """
         # 检查输入数据
+        print(expert_data.keys())
         if 'expert_states' not in expert_data or 'expert_actions' not in expert_data:
             raise ValueError("expert_data必须包含'expert_states'和'expert_actions'")
         
