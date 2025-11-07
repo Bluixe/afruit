@@ -89,7 +89,7 @@ class OfflineRLearner:
             raise ValueError(f"vae_hidden_dim必须为16-1024范围内的整数，当前值: {self.vae_hidden_dim}")
         
         # 验证perturbation_scale
-        if not isinstance(self.perturbation_scale, float) or not (self.perturbation_scale <= 1.0):
+        if not (self.perturbation_scale <= 1.0):
             raise ValueError(f"perturbation_scale必须在0.0-1.0范围内，当前值: {self.perturbation_scale}")
         
         # 验证replay_ratio
