@@ -28,7 +28,7 @@ class OfflineRLearner:
     def __init__(self,
                  cql_weight: float = 0.5,
                  vae_hidden_dim: int = 256,
-                 perturbation_scale: float = 0.05,
+                 perturbation_scale: float = 0,
                  replay_ratio: float = 0.8,
                  num_quantiles: int = 200,
                  discount_factor: float = 0.99,

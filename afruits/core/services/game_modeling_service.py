@@ -147,7 +147,7 @@ class GameModelingService:
         # 提取模型参数
         cql_weight = model_config.get('cql_weight', 0.5)
         vae_hidden_dim = model_config.get('vae_hidden_dim', 256)
-        perturbation_scale = model_config.get('perturbation_scale', 0.05)
+        perturbation_scale = model_config.get('perturbation_scale', 0)
         replay_ratio = model_config.get('replay_ratio', 0.8)
         num_quantiles = model_config.get('num_quantiles', 200)
         discount_factor = model_config.get('discount_factor', 0.99)
