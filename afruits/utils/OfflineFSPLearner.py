@@ -342,7 +342,6 @@ class OfflineFSPLearner:
                 
                 # 计算当前Q值
                 q_values = self.network(batch_states)
-                print(q_values.shape, batch_actions.shape) # (64, 5), (64, 5)
                 q_values_selected = q_values.gather(1, batch_actions.unsqueeze(1)).squeeze()
                 
                 # 计算目标Q值

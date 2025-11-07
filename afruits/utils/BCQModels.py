@@ -2,7 +2,10 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
-from typing import Tuple, Optional
+from typing import Tuple, Optional, Dict, Any, Union
+
+from tianshou.data import Batch, ReplayBuffer, to_torch
+from nets.cql.base import BasePolicy
 
 class VAE(nn.Module):
     """
@@ -206,13 +209,14 @@ class VAE(nn.Module):
         return sampled_action
 
 
-class DiscreteBCQPolicy(nn.Module):
+class DiscreteBCQPolicy(BasePolicy):
     """
     离散 BCQ 策略类
     
     功能描述：
     - 实现离散动作空间的 Batch Constrained Q-learning (BCQ) 算法
     - 使用 VAE 生成动作，使用 Q 网络评估动作价值
+    - 接口与 DiscreteCQLPolicy 保持一致，便于替换使用
     """
     
     def __init__(
@@ -224,7 +228,8 @@ class DiscreteBCQPolicy(nn.Module):
         device: str = "cuda" if torch.cuda.is_available() else "cpu",
         perturbation_scale: float = 0.05,
         num_samples: int = 10,
-        threshold: float = 0.3
+        threshold: float = 0.3,
+        **kwargs: Any,
     ):
         """
         初始化离散 BCQ 策略
@@ -239,7 +244,7 @@ class DiscreteBCQPolicy(nn.Module):
             num_samples (int): 采样数量，默认为 10
             threshold (float): 阈值，用于过滤低概率动作，默认为 0.3
         """
-        super(DiscreteBCQPolicy, self).__init__()
+        super(DiscreteBCQPolicy, self).__init__(**kwargs)
         
         self.q_network = q_network
         self.vae = vae
@@ -249,29 +254,43 @@ class DiscreteBCQPolicy(nn.Module):
         self.perturbation_scale = perturbation_scale
         self.num_samples = num_samples
         self.threshold = threshold
+        
+        # 多智能体环境相关属性
+        self.num_envs = 1
+        self.num_agents = 1
+        self._control_agents = []
+        self._map_a2id = dict()
     
-    def forward(self, state: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self,
+        batch: Batch,
+        state: Optional[Union[dict, Batch, np.ndarray]] = None,
+        **kwargs: Any,
+    ) -> Batch:
         """
-        前向传播
+        计算给定批次数据的动作
         
         参数:
-            state (torch.Tensor): 状态张量 [batch_size, state_dim]
+            batch: 输入数据批次
+            state: 可选的状态
+            **kwargs: 其他参数
             
         返回:
-            action (torch.Tensor): 选择的动作 [batch_size]
+            包含动作和状态的 Batch
         """
+        obs = batch.obs
         with torch.no_grad():
             # 从 VAE 中采样多个动作
-            state_expanded = state.unsqueeze(1).repeat(1, self.num_samples, 1).view(-1, self.state_dim)
-            z = torch.randn(state_expanded.size(0), self.vae.latent_dim, device=self.device)
+            obs_expanded = obs.unsqueeze(1).repeat(1, self.num_samples, 1).view(-1, self.state_dim)
+            z = torch.randn(obs_expanded.size(0), self.vae.latent_dim, device=self.device)
             z = z * self.perturbation_scale
             
             # 解码为动作 logits
-            action_logits = self.vae.decode(state_expanded, z)
+            action_logits = self.vae.decode(obs_expanded, z)
             action_probs = F.softmax(action_logits, dim=1)
             
             # 重塑为 [batch_size, num_samples, action_dim]
-            batch_size = state.size(0)
+            batch_size = obs.size(0)
             action_probs = action_probs.view(batch_size, self.num_samples, -1)
             
             # 计算每个动作的平均概率
@@ -285,15 +304,51 @@ class DiscreteBCQPolicy(nn.Module):
                 mask = torch.zeros_like(mask).scatter_(1, avg_action_probs.argmax(dim=1, keepdim=True), 1.0)
             
             # 获取 Q 值
-            q_values, _ = self.q_network(state)
+            logits, hidden = self.q_network(obs, state=state, info=kwargs.get("info", None))
+            q_values = self.compute_q_value(logits, None)
             
             # 应用掩码
-            q_values = q_values * mask - (1 - mask) * 1e8
+            masked_q_values = q_values * mask - (1 - mask) * 1e8
             
             # 选择 Q 值最高的动作
-            action = q_values.argmax(dim=1)
+            act = masked_q_values.argmax(dim=1)
         
-        return action
+        return Batch(logits=logits, act=act, state=hidden)
+    
+    def reset(self, num_envs, num_agents):
+        """
+        重置策略状态
+        
+        参数:
+            num_envs (int): 环境数量
+            num_agents (int): 智能体数量
+        """
+        self.num_envs = num_envs
+        self.num_agents = num_agents
+        self._control_agents = []
+        self._map_a2id = dict()
+    
+    @property
+    def control_agents(self):
+        """
+        获取控制的智能体列表
+        
+        返回:
+            list: 控制的智能体列表
+        """
+        return self._control_agents
+    
+    def register_control_agent(self, e, a):
+        """
+        注册控制的智能体
+        
+        参数:
+            e: 环境 ID
+            a: 智能体 ID
+        """
+        if (e, a) not in self._control_agents:
+            self._control_agents.append((e, a))
+            self._map_a2id[(e, a)] = len(self._control_agents)
     
     def step(self, obs, device):
         """
@@ -307,7 +362,41 @@ class DiscreteBCQPolicy(nn.Module):
             act: 选择的动作
         """
         obs = torch.tensor(obs).float().to(device)
-        return self.forward(obs).item()
+        with torch.no_grad():
+            # 获取 Q 值
+            logits, _ = self.q_network(obs, state=None, info=None)
+            q_values = self.compute_q_value(logits, None)
+            
+            # 使用 VAE 生成动作概率
+            state_expanded = obs.unsqueeze(1).repeat(1, self.num_samples, 1).view(-1, self.state_dim)
+            z = torch.randn(state_expanded.size(0), self.vae.latent_dim, device=device)
+            z = z * self.perturbation_scale
+            
+            # 解码为动作 logits
+            action_logits = self.vae.decode(state_expanded, z)
+            action_probs = F.softmax(action_logits, dim=1)
+            
+            # 重塑为 [batch_size, num_samples, action_dim]
+            batch_size = obs.size(0)
+            action_probs = action_probs.view(batch_size, self.num_samples, -1)
+            
+            # 计算每个动作的平均概率
+            avg_action_probs = action_probs.mean(dim=1)
+            
+            # 创建掩码，过滤低概率动作
+            mask = (avg_action_probs >= self.threshold).float()
+            
+            # 如果所有动作都被过滤，则选择概率最高的动作
+            if mask.sum(dim=1).min() == 0:
+                mask = torch.zeros_like(mask).scatter_(1, avg_action_probs.argmax(dim=1, keepdim=True), 1.0)
+            
+            # 应用掩码
+            masked_q_values = q_values * mask - (1 - mask) * 1e8
+            
+            # 使用 multinomial 采样，类似于 DiscreteCQLPolicy
+            act = torch.multinomial(torch.softmax(masked_q_values, dim=-1), num_samples=1).item()
+            
+        return act
     
     def get_q_value(self, obs, action, device):
         """
@@ -322,7 +411,35 @@ class DiscreteBCQPolicy(nn.Module):
             q: Q 值
         """
         obs = torch.tensor(obs).float().to(device)
-        q, _ = self.q_network(obs)
+        logits, _ = self.q_network(obs, state=None, info=None)
+        q_values = self.compute_q_value(logits, None)
         action = torch.tensor(action).long().to(device)
-        q = q.gather(1, action.unsqueeze(1)).squeeze(1)
+        q = q_values.gather(1, action.unsqueeze(1)).squeeze(1)
         return q
+    
+    def compute_q_value(self, logits, mask=None):
+        """
+        计算 Q 值，与 DiscreteCQLPolicy 保持一致的接口
+        
+        参数:
+            logits: 网络输出的 logits
+            mask: 掩码
+            
+        返回:
+            q_value: Q 值
+        """
+        return logits
+    
+    def learn(self, batch: Batch, **kwargs: Any) -> Dict[str, Any]:
+        """
+        使用给定的数据批次更新策略
+        
+        参数:
+            batch: 数据批次
+            **kwargs: 其他参数
+            
+        返回:
+            包含需要记录的数据的字典（例如，损失）
+        """
+        # BCQ 策略不需要学习，这里只是为了满足 BasePolicy 的接口要求
+        return {"loss": 0.0}
