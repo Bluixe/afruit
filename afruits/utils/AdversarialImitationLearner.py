@@ -123,10 +123,15 @@ class AdversarialImitationLearner:
         if expert_states and expert_actions:
             expert_states = np.array(expert_states)
             expert_actions = np.array(expert_actions)
+            
+            # 检查动作数据的形状，确保它是离散动作 (batch_size,) 或连续动作 (batch_size, action_dim)
+            if len(expert_actions.shape) > 2:
+                raise ValueError(f"动作数据维度过高: {expert_actions.shape}，应为 (batch_size,) 或 (batch_size, action_dim)")
         else:
             raise ValueError("处理后的数据为空，请检查输入数据")
         
         print(f"数据预处理完成: expert_states shape: {expert_states.shape}, expert_actions shape: {expert_actions.shape}")
+        print(f"动作类型: {'离散动作' if len(expert_actions.shape) == 1 else '连续动作'}")
         return expert_states, expert_actions
     
     def build_models(self, state_dim: int, action_dim: int, generator_args: Dict = None, discriminator_args: Dict = None) -> Tuple[nn.Module, nn.Module]:
@@ -230,8 +235,9 @@ class AdversarialImitationLearner:
             layers.append(nn.ReLU())
             layers.append(nn.Dropout(dropout))
         
-        # 输出层 - 动作分布参数
+        # 输出层 - 动作分布参数（概率分布）
         layers.append(nn.Linear(hidden_dim, self.action_dim))
+        layers.append(nn.Softmax(dim=1))  # 添加Softmax确保输出是概率分布
         
         # 创建模型
         generator = nn.Sequential(*layers)
@@ -339,13 +345,25 @@ class AdversarialImitationLearner:
         # 根据输入数据的维度构建模型
         if self.generator is None or self.discriminator is None:
             state_dim = expert_states.shape[1]  # 状态维度
-            action_dim = max(expert_actions) + 1  # 动作维度（离散动作假设）
+            # 如果动作是离散的，我们需要知道动作空间的大小
+            if len(expert_actions.shape) == 1:  # 离散动作 (batch_size,)
+                action_dim = int(max(expert_actions) + 1)  # 动作维度（离散动作）
+            else:  # 连续动作 (batch_size, action_dim)
+                action_dim = expert_actions.shape[1]
             print(f"根据输入数据构建模型: state_dim={state_dim}, action_dim={action_dim}")
             self.build_models(state_dim, action_dim, generator_args, discriminator_args)
         
         # 转换为PyTorch张量
         expert_states_tensor = torch.FloatTensor(expert_states).to(self.device)
-        expert_actions_tensor = torch.FloatTensor(expert_actions).to(self.device)
+        # 处理离散动作，转换为one-hot编码
+        if len(expert_actions.shape) == 1:  # 离散动作 (batch_size,)
+            # 创建one-hot编码
+            expert_actions_one_hot = np.zeros((expert_actions.shape[0], self.action_dim))
+            for i, action in enumerate(expert_actions):
+                expert_actions_one_hot[i, int(action)] = 1.0
+            expert_actions_tensor = torch.FloatTensor(expert_actions_one_hot).to(self.device)
+        else:  # 已经是连续形式 (batch_size, action_dim)
+            expert_actions_tensor = torch.FloatTensor(expert_actions).to(self.device)
         
         # 创建数据集和数据加载器
         expert_dataset = TensorDataset(expert_states_tensor, expert_actions_tensor)
@@ -373,7 +391,7 @@ class AdversarialImitationLearner:
                     
                     # 生成动作
                     with torch.no_grad():
-                        generated_actions = self.generator(expert_states_batch)
+                        generated_actions = self.generator(expert_states_batch)  # (batch_size, action_dim)
                     
                     # 真实数据
                     real_data = torch.cat([expert_states_batch, expert_actions_batch], dim=1)
@@ -404,7 +422,7 @@ class AdversarialImitationLearner:
                 self.gen_optimizer.zero_grad()
                 
                 # 生成动作
-                generated_actions = self.generator(expert_states_batch)
+                generated_actions = self.generator(expert_states_batch)  # (batch_size, action_dim)
                 
                 # 生成数据
                 fake_data = torch.cat([expert_states_batch, generated_actions], dim=1)
@@ -496,14 +514,19 @@ class AdversarialImitationLearner:
                 
                 # 生成动作
                 with torch.no_grad():
-                    action_tensor = self.generator(obs_tensor)
-                    action = action_tensor.cpu().numpy()[0]
+                    action_probs = self.generator(obs_tensor)  # (1, action_dim)
+                    # 从动作概率分布中选择动作
+                    action_idx = torch.argmax(action_probs, dim=1).item()  # 选择概率最高的动作
+                    # 保存动作张量用于后续判别器评估
+                    action_tensor = action_probs
+                    # 创建完整的动作向量（用于环境交互）
+                    action = action_probs.cpu().numpy()[0]
                 
-                # 执行动作
-                next_obs, reward, done, info = test_env.step(action)
+                # 执行动作 - 使用离散动作索引
+                next_obs, reward, done, info = test_env.step(action_idx)
                 
-                # 记录轨迹
-                trajectory.append((obs, action))
+                # 记录轨迹 - 同时保存离散动作索引和动作概率分布
+                trajectory.append((obs, action_idx, action))
                 
                 # 累积奖励
                 episode_reward += reward
@@ -515,7 +538,10 @@ class AdversarialImitationLearner:
                 with torch.no_grad():
                     # 真实数据（假设有专家动作）
                     if hasattr(test_env, 'get_expert_action'):
-                        expert_action = test_env.get_expert_action(obs)
+                        expert_action_idx = test_env.get_expert_action(obs)  # 获取离散动作索引
+                        # 创建one-hot编码
+                        expert_action = np.zeros(self.action_dim)
+                        expert_action[expert_action_idx] = 1.0
                         expert_data = torch.cat([
                             obs_tensor,
                             torch.FloatTensor(expert_action).unsqueeze(0).to(self.device)

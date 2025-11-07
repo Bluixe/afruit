@@ -224,7 +224,7 @@ class BehaviorCloner:
         else:
             input_dim = X_train.shape[1] # 展平输入特征
         # output_dim = y_train.shape[1]  # 输出动作维度
-        output_dim = max(y_train) + 1  # 离散动作维度
+        output_dim = int(max(y_train) + 1)  # 离散动作维度
         
         if self.network_type == "MLP":
             # 创建MLP模型
@@ -259,7 +259,8 @@ class BehaviorCloner:
         self.optimizer = optim.Adam(self.model.parameters(), lr=0.001)
         
         # 定义损失函数
-        criterion = nn.MSELoss()
+        # CrossEntropyLoss适用于分类任务
+        criterion = nn.CrossEntropyLoss()
         
         # 训练历史记录
         history = {
