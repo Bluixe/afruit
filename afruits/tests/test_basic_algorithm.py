@@ -25,7 +25,7 @@ class TestBasicAlgorithm(unittest.TestCase):
     
     #---------- 辅助方法 ----------#
     
-    def create_game_modeling_data(self):
+    def create_game_modeling_data(self, algorithm_type='BehaviorCloner'):
         """创建博弈建模训练数据"""
         # 创建模拟的轨迹数据
         trajectories = {}
@@ -37,16 +37,39 @@ class TestBasicAlgorithm(unittest.TestCase):
             actions = np.random.rand(20, 5)  # 5维动作空间
             opponent_actions = np.random.rand(20, 5)  # 对手动作
             next_states = np.random.rand(20, 10)  # 下一个状态
+
+            if algorithm_type == 'OfflineRLearner':
+                # 离线强化学习需要单独的轨迹格式
+                trajectories[f'traj_{i}'] = {
+                    'states': states,
+                    'actions': actions,
+                    'rewards': np.random.rand(20),  # 随机奖励
+                    'next_states': next_states,
+                    'dones': np.zeros(20),  # 完成标志
+                    'infos': [{} for _ in range(20)]  # 额外信息
+                }
+            elif algorithm_type == 'OfflineFSPLearner':
+                # 离线自对弈需要单独的轨迹格式
+                trajectories[f'traj_{i}'] = {
+                    'states': states,
+                    'actions': actions,
+                    'opponent_actions': opponent_actions,
+                    'next_states': next_states,
+                    'rewards': np.random.rand(20),  # 随机奖励
+                    'dones': np.zeros(20),  # 完成标志
+                    'infos': [{} for _ in range(20)]  # 额外信息
+                }
+            else:
             
-            trajectories[f'traj_{i}'] = {
-                'states': states,
-                'actions': actions,
-                # 'opponent_actions': opponent_actions,
-                # 'next_states': next_states,
-                'rewards': np.random.rand(20),  # 随机奖励
-                'dones': np.zeros(20),  # 完成标志
-                'infos': [{} for _ in range(20)]  # 额外信息
-            }
+                trajectories[f'traj_{i}'] = {
+                    'states': states,
+                    'actions': actions,
+                    # 'opponent_actions': opponent_actions,
+                    # 'next_states': next_states,
+                    'rewards': np.random.rand(20),  # 随机奖励
+                    'dones': np.zeros(20),  # 完成标志
+                    'infos': [{} for _ in range(20)]  # 额外信息
+                }
         
         return trajectories
     

@@ -86,16 +86,12 @@ class BehaviorCloner:
             3. 标准化特征到[-1, 1]区间
         """
         # 初始化结果
-        X_train = []
-        y_train = []
+        expert_states = []
+        expert_actions = []
         
         # 检查输入数据
         if not raw_trajectories or not isinstance(raw_trajectories, dict):
-            raise ValueError("raw_trajectories必须是非空字典")
-        
-        # 检查上下文帧数
-        if not isinstance(context_frames, int) or context_frames <= 0:
-            raise ValueError(f"context_frames必须为正整数，当前值: {context_frames}")
+            raise ValueError("expert_trajectories必须是非空字典")
         
         # 处理轨迹数据
         for traj_id, trajectory in raw_trajectories.items():
@@ -112,25 +108,19 @@ class BehaviorCloner:
                 print(f"警告: 轨迹 {traj_id} 的状态和动作数据长度不匹配，已跳过")
                 continue
             
-            # 创建上下文窗口
-            for i in range(len(states) - context_frames):
-                # 提取上下文窗口的状态序列
-                state_window = states[i:i+context_frames]
-                # 提取对应的下一个动作
-                next_action = actions[i+context_frames]
-                
-                X_train.append(state_window)
-                y_train.append(next_action)
+            # 添加数据
+            expert_states.extend(states)
+            expert_actions.extend(actions)
         
         # 转换为numpy数组
-        if X_train and y_train:
-            X_train = np.array(X_train)
-            y_train = np.array(y_train)
+        if expert_states and expert_actions:
+            expert_states = np.array(expert_states)
+            expert_actions = np.array(expert_actions)
         else:
             raise ValueError("处理后的数据为空，请检查输入数据")
         
-        print(f"数据处理完成: X_train shape: {X_train.shape}, y_train shape: {y_train.shape}")
-        return X_train, y_train
+        print(f"数据预处理完成: expert_states shape: {expert_states.shape}, expert_actions shape: {expert_actions.shape}")
+        return expert_states, expert_actions
     
     def extract_features(self, state_data: np.ndarray) -> Dict:
         """
