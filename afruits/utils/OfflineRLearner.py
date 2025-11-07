@@ -281,6 +281,9 @@ class OfflineRLearner:
         
         # 判断是否使用BCQ算法
         is_bcq = hasattr(self, 'vae') and self.perturbation_scale > 0
+
+        self.vae.to(self.device) if is_bcq else None
+        self.policy.to(self.device)
         
         # 训练循环
         for epoch in range(epochs):
