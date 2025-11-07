@@ -35,7 +35,7 @@ class OfflineRLearner:
                  estimation_step: int = 1,
                  target_update_freq: int = 0,
                  reward_normalization: bool = False,
-                 device: str = "cuda" if torch.cuda.is_available() else "cpu"):
+                 device: str = "cpu"):
         """
         初始化离线强化学习训练器
         
