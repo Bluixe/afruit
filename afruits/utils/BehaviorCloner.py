@@ -202,9 +202,9 @@ class BehaviorCloner:
         if X_train.shape[0] != y_train.shape[0]:
             raise ValueError(f"X_train和y_train的样本数不匹配: {X_train.shape[0]} vs {y_train.shape[0]}")
         
-        # 转换为PyTorch张量
+        # 转换为PyTorch张量, 确保y为整数类型
         X_tensor = torch.FloatTensor(X_train)
-        y_tensor = torch.FloatTensor(y_train)
+        y_tensor = torch.LongTensor(y_train)
         
         # 创建数据集和数据加载器
         dataset = TensorDataset(X_tensor, y_tensor)
