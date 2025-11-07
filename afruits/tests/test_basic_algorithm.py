@@ -125,7 +125,7 @@ class TestBasicAlgorithm(unittest.TestCase):
         print("\n测试小样本博弈建模模块的行为克隆功能 (BehaviorCloner)")
         
         # 创建测试数据
-        training_data = self.create_game_modeling_data()
+        training_data = self.create_game_modeling_data("BehaviorCloner")
         
         # 配置模型
         model_config = {
@@ -178,7 +178,7 @@ class TestBasicAlgorithm(unittest.TestCase):
         print("\n测试小样本博弈建模模块的对抗模仿学习功能 (AdversarialImitationLearner)")
         
         # 创建测试数据
-        training_data = self.create_game_modeling_data()
+        training_data = self.create_game_modeling_data("AdversarialImitationLearner")
         
         # 配置模型
         model_config = {
@@ -233,7 +233,7 @@ class TestBasicAlgorithm(unittest.TestCase):
         print("\n测试小样本博弈建模模块的离线强化学习功能 (OfflineRLearner)")
         
         # 创建测试数据
-        training_data = self.create_game_modeling_data()
+        training_data = self.create_game_modeling_data("OfflineRLearner")
         
         # 配置模型
         model_config = {
@@ -288,7 +288,7 @@ class TestBasicAlgorithm(unittest.TestCase):
         print("\n测试小样本博弈建模模块的离线自对弈功能 (OfflineFSPLearner)")
         
         # 创建测试数据
-        training_data = self.create_game_modeling_data()
+        training_data = self.create_game_modeling_data("OfflineFSPLearner")
         
         # 配置模型
         model_config = {

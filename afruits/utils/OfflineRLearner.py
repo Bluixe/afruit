@@ -154,12 +154,15 @@ class OfflineRLearner:
                 
                 # 添加到buffer
                 buffer.add(
+                    Batch(
                     obs=obs,
                     act=act,
                     rew=rew,
                     done=done,
+                    terminated=done,
+                    truncated=done,
                     obs_next=obs_next,
-                    info={}
+                    info={})
                 )
         
         print(f"数据预处理完成: 共添加 {len(buffer)} 条数据到ReplayBuffer")
