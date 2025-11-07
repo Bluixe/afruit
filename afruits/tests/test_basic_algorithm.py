@@ -75,7 +75,7 @@ class TestBasicAlgorithm(unittest.TestCase):
     def create_game_modeling_test_data(self, algorithm_type='BehaviorCloner'):
         """创建博弈建模测试数据"""
         # 创建模拟的轨迹数据
-        test_trajectories = []
+        test_trajectories = {}
         
         # 创建10条轨迹
         for i in range(10):
