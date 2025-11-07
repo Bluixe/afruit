@@ -185,36 +185,32 @@ class GameModelingService:
         self.logger.info("训练离线虚构自我博弈模型")
         
         # 提取模型参数
-        batch_size = model_config.get('batch_size', 64)
-        network_arch = model_config.get('network_arch', [256, 256])
-        learning_rate = model_config.get('learning_rate', 3e-4)
-        discount_factor = model_config.get('discount_factor', 0.99)
-        num_iterations = model_config.get('num_iterations', 10000)
-        br_weight = model_config.get('br_weight', 0.5)
+        strategy_pool_size = model_config.get('strategy_pool_size', 20)
+        cql_penalty_weight = model_config.get('cql_penalty_weight', 0.7)
+        exposure_ratio = model_config.get('exposure_ratio', 0.6)
+        importance_beta = model_config.get('importance_beta', 0.5)
+        num_iterations = model_config.get('num_iterations', 50)
         
         # 创建模型
         model = OfflineFSPLearner(
-            batch_size=batch_size,
-            network_arch=network_arch,
-            learning_rate=learning_rate,
-            discount_factor=discount_factor,
-            br_weight=br_weight
+            strategy_pool_size=strategy_pool_size,
+            cql_penalty_weight=cql_penalty_weight,
+            exposure_ratio=exposure_ratio,
+            importance_beta=importance_beta
         )
         
         # 训练模型
-        training_history = model.train(training_data, num_iterations=num_iterations)
+        training_history = model.fictitious_play(training_data, num_iterations=num_iterations)
         
         # 提取训练指标
         metrics = {
-            'avg_policy_loss': training_history.get('avg_policy_loss', []),
-            'br_policy_loss': training_history.get('br_policy_loss', []),
+            'q_loss': training_history.get('q_loss', []),
+            'policy_loss': training_history.get('policy_loss', []),
+            'opponent_loss': training_history.get('opponent_loss', []),
             'exploitability': training_history.get('exploitability', []),
-            'final_avg_policy_loss': training_history.get('avg_policy_loss', [-1])[-1] if training_history.get('avg_policy_loss') else None,
-            'final_br_policy_loss': training_history.get('br_policy_loss', [-1])[-1] if training_history.get('br_policy_loss') else None,
-            'final_exploitability': training_history.get('exploitability', [-1])[-1] if training_history.get('exploitability') else None
         }
         
-        self.logger.info(f"离线虚构自我博弈模型训练完成，最终平均策略损失: {metrics['final_avg_policy_loss']}, BR策略损失: {metrics['final_br_policy_loss']}, 可利用性: {metrics['final_exploitability']}")
+        self.logger.info(f"离线虚构自我博弈模型训练完成")
         
         return model, metrics
     
@@ -223,8 +219,6 @@ class GameModelingService:
         self.logger.info("训练对抗模仿学习模型")
         
         # 提取模型参数
-        state_dim = model_config.get('state_dim', 7)
-        action_dim = model_config.get('action_dim', 7)
         gen_learning_rate = model_config.get('gen_learning_rate', 1e-4)
         disc_learning_rate = model_config.get('disc_learning_rate', 5e-5)
         update_ratio = model_config.get('update_ratio', 5)
@@ -234,8 +228,6 @@ class GameModelingService:
         
         # 创建模型
         model = AdversarialImitationLearner(
-            state_dim=state_dim,
-            action_dim=action_dim,
             gen_learning_rate=gen_learning_rate,
             disc_learning_rate=disc_learning_rate,
             update_ratio=update_ratio,
@@ -305,7 +297,7 @@ class GameModelingService:
                 metrics = model.evaluate(test_data)
             elif isinstance(model, OfflineFSPLearner):
                 # 评估离线虚构自我博弈模型
-                metrics = model.evaluate(test_data)
+                metrics = model.evaluate_equilibrium(test_data)
             elif isinstance(model, AdversarialImitationLearner):
                 # 评估对抗模仿学习模型
                 metrics = model.evaluate(test_data.get('test_env'), num_episodes=eval_config.get('num_episodes', 10))
