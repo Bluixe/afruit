@@ -217,10 +217,12 @@ class BehaviorCloner:
         train_loader = DataLoader(train_dataset, batch_size=self.batch_size, shuffle=True)
         val_loader = DataLoader(val_dataset, batch_size=self.batch_size)
         
+        print(X_train.shape, y_train.shape)
         # 创建模型
         if len(X_train.shape) >= 2:
             input_dim = X_train.shape[1] * X_train.shape[2] * X_train.shape[3] if len(X_train.shape) == 4 else X_train.shape[1] * X_train.shape[2]
-        input_dim = X_train.shape[1] * X_train.shape[2]  # 展平输入特征
+        else:
+            input_dim = X_train.shape[1] * X_train.shape[2]  # 展平输入特征
         output_dim = y_train.shape[1]  # 输出动作维度
         
         if self.network_type == "MLP":
