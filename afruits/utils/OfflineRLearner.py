@@ -81,7 +81,7 @@ class OfflineRLearner:
     def _validate_params(self):
         """验证初始化参数是否合法"""
         # 验证cql_weight
-        if not isinstance(self.cql_weight, float) or not (0.0 < self.cql_weight <= 10.0):
+        if not isinstance(self.cql_weight, float) or not (0.0 <= self.cql_weight <= 10.0):
             raise ValueError(f"cql_weight必须在0.0-10.0范围内，当前值: {self.cql_weight}")
         
         # 验证vae_hidden_dim
