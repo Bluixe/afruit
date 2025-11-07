@@ -80,7 +80,7 @@ class TestBasicAlgorithm(unittest.TestCase):
             'model_type': 'BehaviorCloner',  # 使用行为克隆模型
             'batch_size': 32,
             'network_type': 'MLP',
-            'max_epochs': 10,  # 减少训练轮数以加快测试
+            'max_epochs': 50,  # 减少训练轮数以加快测试
             'dropout_rate': 0.2,
             'context_frames': 4,
             'validation_split': 0.2
@@ -139,7 +139,7 @@ class TestBasicAlgorithm(unittest.TestCase):
             'gen_learning_rate': 1e-4,
             'disc_learning_rate': 1e-5,
             'batch_size': 32,
-            'max_epochs': 10,  # 减少训练轮数以加快测试
+            'max_epochs': 50, 
             'gp_lambda': 10.0,  # 梯度惩罚系数
             'validation_split': 0.2
         }
@@ -196,7 +196,7 @@ class TestBasicAlgorithm(unittest.TestCase):
             'hidden_dim': 64,
             'learning_rate': 3e-4,
             'batch_size': 32,
-            'max_epochs': 10,  # 减少训练轮数以加快测试
+            'max_epochs': 50,  # 减少训练轮数以加快测试
             'cql_weight': 0.5,  # CQL正则化权重
             'target_update_interval': 5,
             'validation_split': 0.2
@@ -254,7 +254,7 @@ class TestBasicAlgorithm(unittest.TestCase):
             'avg_hidden_dim': 64,
             'learning_rate': 1e-4,
             'batch_size': 32,
-            'max_epochs': 10,  # 减少训练轮数以加快测试
+            'max_epochs': 50,  # 减少训练轮数以加快测试
             'br_update_interval': 5,
             'validation_split': 0.2
         }

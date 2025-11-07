@@ -11,6 +11,7 @@ import copy
 from utils.BehaviorCloner import BehaviorCloner
 from utils.OfflineRLearner import OfflineRLearner
 from utils.OfflineFSPLearner import OfflineFSPLearner
+from utils.AdversarialImitationLearner import AdversarialImitationLearner
 
 class GameModelingService:
     """
@@ -77,6 +78,8 @@ class GameModelingService:
                 model, metrics = self._train_offline_rl(training_data, model_config)
             elif model_type == 'OfflineFSPLearner':
                 model, metrics = self._train_offline_fsp(training_data, model_config)
+            elif model_type == 'AdversarialImitationLearner':
+                model, metrics = self._train_adversial_imitation_learner(training_data, model_config)
             else:
                 raise ValueError(f"不支持的模型类型: {model_type}")
             
@@ -97,6 +100,7 @@ class GameModelingService:
         except Exception as e:
             self.logger.error(f"模型训练失败: {str(e)}")
             raise
+
     
     def _train_behavior_cloner(self, training_data: Dict, model_config: Dict) -> Tuple[BehaviorCloner, Dict]:
         """训练行为克隆模型"""
@@ -214,6 +218,62 @@ class GameModelingService:
         
         return model, metrics
     
+    def _train_adversial_imitation_learner(self, training_data: Dict, model_config: Dict) -> Tuple[AdversarialImitationLearner, Dict]:
+        """训练对抗模仿学习模型"""
+        self.logger.info("训练对抗模仿学习模型")
+        
+        # 提取模型参数
+        state_dim = model_config.get('state_dim', 7)
+        action_dim = model_config.get('action_dim', 7)
+        gen_learning_rate = model_config.get('gen_learning_rate', 1e-4)
+        disc_learning_rate = model_config.get('disc_learning_rate', 5e-5)
+        update_ratio = model_config.get('update_ratio', 5)
+        gp_lambda = model_config.get('gp_lambda', 10.0)
+        batch_size = model_config.get('batch_size', 64)
+        epochs = model_config.get('epochs', 100)
+        
+        # 创建模型
+        model = AdversarialImitationLearner(
+            state_dim=state_dim,
+            action_dim=action_dim,
+            gen_learning_rate=gen_learning_rate,
+            disc_learning_rate=disc_learning_rate,
+            update_ratio=update_ratio,
+            gp_lambda=gp_lambda,
+            device=self.device
+        )
+        
+        # 处理数据
+        expert_states, expert_actions = model.preprocess_data(training_data)
+        
+        # 构建模型
+        generator_args = model_config.get('generator_args', {})
+        discriminator_args = model_config.get('discriminator_args', {})
+        model.build_models(generator_args, discriminator_args)
+        
+        # 准备训练数据
+        expert_data = {
+            'expert_states': expert_states,
+            'expert_actions': expert_actions
+        }
+        
+        # 训练模型
+        training_history = model.train(expert_data, batch_size=batch_size, epochs=epochs)
+        
+        # 提取训练指标
+        metrics = {
+            'gen_loss': training_history.get('gen_loss', []),
+            'disc_loss': training_history.get('disc_loss', []),
+            'wasserstein_dist': training_history.get('wasserstein_dist', []),
+            'final_gen_loss': training_history.get('gen_loss', [-1])[-1] if training_history.get('gen_loss') else None,
+            'final_disc_loss': training_history.get('disc_loss', [-1])[-1] if training_history.get('disc_loss') else None,
+            'final_wasserstein_dist': training_history.get('wasserstein_dist', [-1])[-1] if training_history.get('wasserstein_dist') else None
+        }
+        
+        self.logger.info(f"对抗模仿学习模型训练完成，最终生成器损失: {metrics['final_gen_loss']:.4f}, 判别器损失: {metrics['final_disc_loss']:.4f}, Wasserstein距离: {metrics['final_wasserstein_dist']:.4f}")
+        
+        return model, metrics
+    
     def evaluate_model(self, model_id: str, test_data: Dict, eval_config: Dict = None) -> Dict:
         """
         评估模型
@@ -246,6 +306,9 @@ class GameModelingService:
             elif isinstance(model, OfflineFSPLearner):
                 # 评估离线虚构自我博弈模型
                 metrics = model.evaluate(test_data)
+            elif isinstance(model, AdversarialImitationLearner):
+                # 评估对抗模仿学习模型
+                metrics = model.evaluate(test_data.get('test_env'), num_episodes=eval_config.get('num_episodes', 10))
             else:
                 raise ValueError(f"不支持的模型类型: {type(model).__name__}")
             
@@ -295,6 +358,12 @@ class GameModelingService:
             elif isinstance(model, OfflineFSPLearner):
                 # 使用离线虚构自我博弈模型预测
                 return model.act(state)
+            elif isinstance(model, AdversarialImitationLearner):
+                # 使用对抗模仿学习模型预测
+                state_tensor = torch.FloatTensor(state).unsqueeze(0).to(self.device)
+                with torch.no_grad():
+                    action = model.generator(state_tensor).cpu().numpy()[0]
+                return action
             else:
                 raise ValueError(f"不支持的模型类型: {type(model).__name__}")
             
@@ -358,6 +427,8 @@ class GameModelingService:
                 model = OfflineRLearner(**(model_config or {}))
             elif model_type == 'OfflineFSPLearner':
                 model = OfflineFSPLearner(**(model_config or {}))
+            elif model_type == 'AdversarialImitationLearner':
+                model = AdversarialImitationLearner(**(model_config or {}))
             else:
                 raise ValueError(f"不支持的模型类型: {model_type}")
             
