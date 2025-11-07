@@ -41,8 +41,8 @@ class TestBasicAlgorithm(unittest.TestCase):
             trajectories[f'traj_{i}'] = {
                 'states': states,
                 'actions': actions,
-                'opponent_actions': opponent_actions,
-                'next_states': next_states,
+                # 'opponent_actions': opponent_actions,
+                # 'next_states': next_states,
                 'rewards': np.random.rand(20),  # 随机奖励
                 'dones': np.zeros(20),  # 完成标志
                 'infos': [{} for _ in range(20)]  # 额外信息
@@ -66,8 +66,8 @@ class TestBasicAlgorithm(unittest.TestCase):
             test_trajectories.append({
                 'states': states,
                 'actions': actions,
-                'opponent_actions': opponent_actions,
-                'next_states': next_states,
+                # 'opponent_actions': opponent_actions,
+                # 'next_states': next_states,
                 'rewards': np.random.rand(10),  # 随机奖励
                 'dones': np.zeros(10),  # 完成标志
                 'infos': [{} for _ in range(10)]  # 额外信息
