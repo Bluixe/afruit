@@ -9,6 +9,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # 导入API
 from afruits.core.api import AlgorithmAPI
+from afruits.utils.enhanced_test_runner import EnhancedTestRunner
 
 class TestBasicAlgorithm(unittest.TestCase):
     """
@@ -298,4 +299,7 @@ class TestBasicAlgorithm(unittest.TestCase):
         print(f"动作准确率: {eval_result['action_accuracy']:.4f}")
 
 if __name__ == "__main__":
-    unittest.main()
+    # 使用增强的测试运行器而不是默认的
+    test_suite = unittest.TestLoader().loadTestsFromTestCase(TestBasicAlgorithm)
+    runner = EnhancedTestRunner(verbosity=2)
+    runner.run(test_suite)
