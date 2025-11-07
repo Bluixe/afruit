@@ -363,7 +363,7 @@ class GameModelingService:
                 return model.policy.step(state_tensor, 'cpu')
             elif isinstance(model, OfflineFSPLearner):
                 # 使用离线虚构自我博弈模型预测
-                state_tensor = torch.FloatTensor(state).to(self.device)
+                state_tensor = torch.FloatTensor(state)
                 return model.policy_network(state_tensor)
             elif isinstance(model, AdversarialImitationLearner):
                 # 使用对抗模仿学习模型预测

@@ -271,7 +271,7 @@ class TestBasicAlgorithm(unittest.TestCase):
         
         # 验证预测结果
         self.assertIsNotNone(action)
-        print(f"预测动作形状: {action.shape}")
+        print(f"预测动作: {action}")
         
         # 测试评估功能
         test_data = self.create_game_modeling_test_data()
