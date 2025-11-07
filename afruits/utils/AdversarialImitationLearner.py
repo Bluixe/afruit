@@ -330,16 +330,16 @@ class AdversarialImitationLearner:
         """
         # 检查输入数据
         print(expert_data.keys())
-        if 'expert_states' not in expert_data or 'expert_actions' not in expert_data:
+        if 'states' not in expert_data or 'actions' not in expert_data:
             raise ValueError("expert_data必须包含'expert_states'和'expert_actions'")
         
-        expert_states = expert_data['expert_states']
-        expert_actions = expert_data['expert_actions']
+        expert_states = expert_data['states']
+        expert_actions = expert_data['actions']
         
         # 根据输入数据的维度构建模型
         if self.generator is None or self.discriminator is None:
             state_dim = expert_states.shape[1]  # 状态维度
-            action_dim = expert_actions.shape[1]  # 动作维度
+            action_dim = max(expert_actions) + 1  # 动作维度（离散动作假设）
             print(f"根据输入数据构建模型: state_dim={state_dim}, action_dim={action_dim}")
             self.build_models(state_dim, action_dim, generator_args, discriminator_args)
         

@@ -34,7 +34,7 @@ class TestBasicAlgorithm(unittest.TestCase):
         for i in range(10):
             # 每条轨迹包含20个时间步
             states = np.random.rand(20, 10)  # 10维状态空间
-            actions = np.random.rand(20, 5)  # 5维动作空间
+            actions = np.random.randint(0, 5, size=(20,))  # 离散动作空间
             opponent_actions = np.random.rand(20, 5)  # 对手动作
             next_states = np.random.rand(20, 10)  # 下一个状态
 
@@ -81,7 +81,7 @@ class TestBasicAlgorithm(unittest.TestCase):
         for i in range(10):
             # 每条轨迹包含20个时间步
             states = np.random.rand(20, 10)  # 10维状态空间
-            actions = np.random.rand(20, 5)  # 5维动作空间
+            actions = np.random.randint(0, 5, size=(20,))  # 离散动作空间
             opponent_actions = np.random.rand(20, 5)  # 对手动作
             next_states = np.random.rand(20, 10)  # 下一个状态
 

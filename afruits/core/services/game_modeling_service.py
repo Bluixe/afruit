@@ -255,8 +255,8 @@ class GameModelingService:
         
         # 准备训练数据
         expert_data = {
-            'expert_states': expert_states,
-            'expert_actions': expert_actions
+            'states': expert_states,
+            'actions': expert_actions
         }
         
         # 训练模型
