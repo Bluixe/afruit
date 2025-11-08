@@ -179,7 +179,7 @@ class DiffusionTrajGenerator:
                     t_emb = t_emb + c_emb
                 
                 # 初始特征
-                h = torch.cat([x, t_emb], dim=-1)
+                h = torch.cat([x, t_emb], dim=-1).float()
                 
                 # 编码器前向传播
                 skip_connections = [x]

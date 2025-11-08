@@ -336,9 +336,7 @@ class VAETrajGenerator:
         # 设置优化器
         params = list(encoder.parameters()) + list(decoder.parameters())
         self.optimizer = torch.optim.Adam(params, lr=1e-3)
-        self.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-            self.optimizer, mode='min', factor=0.5, patience=5, verbose=True
-        )
+        self.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(self.optimizer, mode='min', factor=0.5, patience=5, min_lr=1e-5)
         
         self.encoder = encoder
         self.decoder = decoder
