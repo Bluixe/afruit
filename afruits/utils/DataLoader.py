@@ -84,8 +84,8 @@ class DataLoaderUtil:
             for traj in data:
                 combined_states.append(traj['states'])
                 combined_actions.append(traj['actions'])
-            states = np.concatenate(combined_states, axis=0)
-            actions = np.concatenate(combined_actions, axis=0)
+            states = np.stack(combined_states, axis=0)
+            actions = np.stack(combined_actions, axis=0)
         
         # 提取轨迹数据（支持同时包含状态和动作）
         elif 'state' in data and 'action' in data:
