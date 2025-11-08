@@ -367,19 +367,6 @@ class TransformerTrainer:
                 # 计算损失
                 loss = criterion(pred_actions, true_actions)
                 
-                # 添加信息瓶颈正则化
-                if self.model.lr_weight > 0:
-                    # 计算注意力权重的熵作为正则化项
-                    _, attentions = self.model(batch, output_attentions=True)
-                    attention_entropy = 0
-                    for attention in attentions:
-                        # 计算注意力权重的熵
-                        entropy = -torch.sum(attention * torch.log(attention + 1e-10)) / attention.size(0)
-                        attention_entropy += entropy
-                    
-                    # 添加到损失中
-                    loss += self.model.lr_weight * attention_entropy
-                
                 # 反向传播和优化
                 optimizer.zero_grad()
                 loss.backward()

@@ -97,8 +97,6 @@ class VAETrajGenerator:
         """
         # 处理输入维度
         has_separate_action = False
-        state_dim = None
-        action_dim = None
         is_image_state = False
         image_shape = None
         self.seq_length = seq_length
@@ -107,9 +105,10 @@ class VAETrajGenerator:
         if isinstance(state_dim, tuple) and len(state_dim) == 1:
             state_dim = state_dim[0]
         has_separate_action = True
-        state_dim = state_dim
-        action_dim = action_dim
+        self.state_dim = state_dim
+        self.action_dim = action_dim
         total_dim = state_dim + action_dim
+
         
         # 检查状态是否为图像（四维张量）
         if isinstance(state_dim, tuple) and len(state_dim) == 3:
@@ -118,6 +117,7 @@ class VAETrajGenerator:
             # 对于图像状态，我们将使用CNN编码器，因此这里的state_dim将是CNN的输出维度
             state_dim = self.im_embd
             total_dim = state_dim + action_dim
+        self.total_dim = total_dim
         
         # 构建编码器
         class Encoder(nn.Module):
