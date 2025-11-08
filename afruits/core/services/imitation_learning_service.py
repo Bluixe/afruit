@@ -124,8 +124,24 @@ class ImitationLearningService:
         """标准训练方法"""
         self.logger.info(f"使用标准训练方法训练 {model_type} 模型")
         
+        # 根据模型类型选择不同的训练函数
+        if model_type == 'AutoencoderModel':
+            return self._train_autoencoder(expert_trajectories, model_config)
+        elif model_type == 'TransformerModel':
+            return self._train_transformer(expert_trajectories, model_config)
+        elif model_type == 'DiffusionTrajGenerator':
+            return self._train_diffusion(expert_trajectories, model_config)
+        elif model_type == 'VAETrajGenerator':
+            return self._train_vae(expert_trajectories, model_config)
+        else:
+            raise ValueError(f"不支持的模型类型: {model_type}")
+    
+    def _train_autoencoder(self, expert_trajectories: Dict, model_config: Dict) -> Tuple[Any, Dict]:
+        """自编码器模型训练方法"""
+        self.logger.info("使用自编码器训练方法")
+        
         # 创建模型
-        model = self._create_model(model_type, model_config)
+        model = self._create_model('AutoencoderModel', model_config)
         
         # 提取训练参数
         epochs = model_config.get('epochs', 100)
@@ -146,7 +162,145 @@ class ImitationLearningService:
             'final_val_loss': training_history.get('val_loss', [-1])[-1] if training_history.get('val_loss') else None
         }
         
-        self.logger.info(f"标准训练完成，最终训练损失: {metrics['final_train_loss']}, 验证损失: {metrics['final_val_loss']}")
+        self.logger.info(f"自编码器训练完成，最终训练损失: {metrics['final_train_loss']}, 验证损失: {metrics['final_val_loss']}")
+        
+        return model, metrics
+    
+    def _train_transformer(self, expert_trajectories: Dict, model_config: Dict) -> Tuple[Any, Dict]:
+        """Transformer模型训练方法"""
+        self.logger.info("使用Transformer训练方法")
+        
+        # 创建模型
+        model = self._create_model('TransformerModel', model_config)
+        
+        # 提取训练参数
+        epochs = model_config.get('epochs', 100)
+        batch_size = model_config.get('batch_size', 32)
+        learning_rate = model_config.get('learning_rate', 1e-4)
+        
+        # 准备数据
+        # 注意：TransformerModel的load_sequences方法可能需要特殊处理
+        # 这里假设数据已经是正确的格式，或者在模型内部进行了处理
+        data_loader = model.load_sequences(expert_trajectories, batch_size=batch_size)
+        
+        # 训练模型
+        training_history = model.train(data_loader, epochs=epochs, learning_rate=learning_rate)
+        
+        # 提取训练指标
+        metrics = {
+            'train_loss': training_history.get('train_loss', []),
+            'val_loss': training_history.get('val_loss', []),
+            'final_train_loss': training_history.get('train_loss', [-1])[-1] if training_history.get('train_loss') else None,
+            'final_val_loss': training_history.get('val_loss', [-1])[-1] if training_history.get('val_loss') else None
+        }
+        
+        self.logger.info(f"Transformer训练完成，最终训练损失: {metrics['final_train_loss']}, 验证损失: {metrics['final_val_loss']}")
+        
+        return model, metrics
+    
+    def _train_diffusion(self, expert_trajectories: Dict, model_config: Dict) -> Tuple[Any, Dict]:
+        """扩散轨迹生成器训练方法"""
+        self.logger.info("使用扩散模型训练方法")
+        
+        # 创建模型
+        model = self._create_model('DiffusionTrajGenerator', model_config)
+        
+        # 提取训练参数
+        epochs = model_config.get('epochs', 100)
+        batch_size = model_config.get('batch_size', 32)
+        
+        # 准备数据
+        # DiffusionTrajGenerator需要特殊的数据处理
+        # 首先检查数据是否已经是DataLoader格式
+        if 'dataloader' in expert_trajectories:
+            data_loader = expert_trajectories['dataloader']
+        else:
+            # 否则，使用模型的load_dataset方法加载数据
+            # 这里假设expert_trajectories中包含data_path
+            data_path = expert_trajectories.get('data_path')
+            if not data_path:
+                # 如果没有data_path，可能需要先将数据保存到临时文件
+                import tempfile
+                import numpy as np
+                
+                temp_dir = tempfile.mkdtemp()
+                data_path = f"{temp_dir}/temp_trajectories.npz"
+                np.savez(data_path, trajectories=expert_trajectories.get('trajectories', []))
+            
+            data_info = model.load_dataset(data_path, seq_len=model_config.get('seq_length'))
+            data_loader = data_info['dataloader']
+        
+        # 确保模型网络已构建
+        if not hasattr(model, 'model') or model.model is None:
+            input_dim = expert_trajectories.get('feature_dim', model_config.get('input_dim', 32))
+            cond_dim = model_config.get('cond_dim', 0)
+            model.build_network(input_dim, cond_dim)
+        
+        # 训练模型
+        training_history = model.train(data_loader, epochs=epochs)
+        
+        # 提取训练指标
+        metrics = {
+            'loss_curve': training_history.get('loss_curve', []),
+            'final_loss': training_history.get('final_loss'),
+            'epochs': training_history.get('epochs')
+        }
+        
+        self.logger.info(f"扩散模型训练完成，最终损失: {metrics['final_loss']}")
+        
+        return model, metrics
+    
+    def _train_vae(self, expert_trajectories: Dict, model_config: Dict) -> Tuple[Any, Dict]:
+        """VAE轨迹生成器训练方法"""
+        self.logger.info("使用VAE训练方法")
+        
+        # 创建模型
+        model = self._create_model('VAETrajGenerator', model_config)
+        
+        # 提取训练参数
+        epochs = model_config.get('epochs', 100)
+        batch_size = model_config.get('batch_size', 32)
+        
+        # 准备数据
+        # VAETrajGenerator需要特殊的数据处理
+        # 首先检查数据是否已经是DataLoader格式
+        if 'dataloader' in expert_trajectories:
+            data_loader = expert_trajectories['dataloader']
+        else:
+            # 否则，使用模型的load_dataset方法加载数据
+            # 这里假设expert_trajectories中包含data_path
+            data_path = expert_trajectories.get('data_path')
+            if not data_path:
+                # 如果没有data_path，可能需要先将数据保存到临时文件
+                import tempfile
+                import numpy as np
+                
+                temp_dir = tempfile.mkdtemp()
+                data_path = f"{temp_dir}/temp_trajectories.npz"
+                np.savez(data_path, trajectories=expert_trajectories.get('trajectories', []))
+            
+            data_info = model.load_dataset(data_path, batch_size=batch_size)
+            data_loader = data_info['dataloader']
+        
+        # 确保模型网络已构建
+        if not hasattr(model, 'encoder') or model.encoder is None:
+            input_dim = expert_trajectories.get('feature_dim', model_config.get('input_dim', 32))
+            model.build_model(input_dim)
+        
+        # 训练模型
+        training_history = model.train(data_loader, epochs=epochs)
+        
+        # 提取训练指标
+        metrics = {
+            'total_loss': training_history.get('total_loss', []),
+            'kl_divergence': training_history.get('kl_divergence', []),
+            'recon_error': training_history.get('recon_error', []),
+            'final_total_loss': training_history.get('total_loss', [-1])[-1] if training_history.get('total_loss') else None,
+            'final_kl_divergence': training_history.get('kl_divergence', [-1])[-1] if training_history.get('kl_divergence') else None,
+            'final_recon_error': training_history.get('recon_error', [-1])[-1] if training_history.get('recon_error') else None
+        }
+        
+        self.logger.info(f"VAE训练完成，最终总损失: {metrics['final_total_loss']}, KL散度: {metrics['final_kl_divergence']}, 重构误差: {metrics['final_recon_error']}")
         
         return model, metrics
     

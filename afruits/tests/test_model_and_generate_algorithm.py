@@ -87,7 +87,7 @@ class TestModelAndGenerateAlgorithm(unittest.TestCase):
         }
         
         # 训练模型
-        result = self.api.train_trajectory_model(training_data, model_config)
+        result = self.api.train_imitation_model(training_data, model_config)
         
         # 验证结果
         self.assertIn('model_id', result)
