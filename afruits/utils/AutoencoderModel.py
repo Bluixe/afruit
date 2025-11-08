@@ -25,7 +25,6 @@ class AutoencoderModel(nn.Module):
                  encoder_type="lstm",  # 编码器类型: "str"或"transformer"
                  latent_dim=32,       # 隐空间维度
                  seq_length=100,      # 序列长度
-                 input_dim=512,       # 输入特征维度
                  kl_weight=0.001,     # 正则化权重
                  dropout_rate=0.2,    # Dropout比率
                  action_dim=None):    # 动作空间维度（用于one-hot编码）
@@ -45,92 +44,17 @@ class AutoencoderModel(nn.Module):
         self.encoder_type = encoder_type
         self.latent_dim = latent_dim
         self.seq_length = seq_length
-        self.input_dim = input_dim
         self.kl_weight = kl_weight
         self.dropout_rate = dropout_rate
         self.action_dim = action_dim
         self.device = device
         
         # 根据编码器类型初始化不同的编码器
-        if encoder_type == "lstm":
-            # LSTM编码器
-            self.encoder = nn.LSTM(
-                input_size=input_dim,
-                hidden_size=latent_dim,
-                num_layers=2,
-                batch_first=True,
-                dropout=dropout_rate,
-                bidirectional=True
-            )
-            
-            # LSTM解码器
-            self.decoder = nn.LSTM(
-                input_size=latent_dim,
-                hidden_size=input_dim,
-                num_layers=2,
-                batch_first=True,
-                dropout=dropout_rate,
-                bidirectional=False
-            )
-            
-            # 输出层
-            self.output_layer = nn.Linear(input_dim, input_dim)
-            
-            # 隐空间映射（双向LSTM输出到单向输入）
-            self.hidden_map = nn.Linear(latent_dim * 2, latent_dim)
-            
-        elif encoder_type == "transformer":
-            # Transformer编码器
-            encoder_layer = nn.TransformerEncoderLayer(
-                d_model=input_dim,
-                nhead=4,
-                dim_feedforward=latent_dim * 4,
-                dropout=dropout_rate,
-                batch_first=True
-            )
-            self.encoder = nn.TransformerEncoder(
-                encoder_layer,
-                num_layers=2
-            )
-            
-            # Transformer解码器
-            decoder_layer = nn.TransformerDecoderLayer(
-                d_model=input_dim,
-                nhead=4,
-                dim_feedforward=latent_dim * 4,
-                dropout=dropout_rate,
-                batch_first=True
-            )
-            self.decoder = nn.TransformerDecoder(
-                decoder_layer,
-                num_layers=2
-            )
-            
-            # 隐空间映射
-            self.hidden_map = nn.Linear(input_dim, latent_dim)
-            
-            # 隐空间逆映射
-            self.hidden_unmap = nn.Linear(latent_dim, input_dim)
-            
-            # 位置编码
-            self.position_embedding = nn.Parameter(
-                torch.zeros(1, seq_length, input_dim)
-            )
-            self._init_position_embedding()
-        
-        else:
-            raise ValueError(f"不支持的编码器类型: {encoder_type}")
 
         # 图像输入检测和处理
         self.is_image_input = False
         self.image_encoder = None
         self.image_decoder = None
-
-        # 动作处理（one-hot编码）
-        if action_dim is not None:
-            self.action_embedding = nn.Embedding(action_dim, action_dim)
-            self.action_linear = nn.Linear(action_dim, action_dim)
-
         self.dataloader_util = DataLoaderUtil()
     
     def _init_position_embedding(self):
@@ -174,31 +98,8 @@ class AutoencoderModel(nn.Module):
         返回:
             tuple: (encoder, decoder)
         """
-        self.input_dim = input_dim
-        self.output_dim = output_dim if output_dim is not None else input_dim
-        self.action_dim = action_dim
-        
-        # 重新初始化模型
-        self.__init__(
-            encoder_type=self.encoder_type,
-            latent_dim=self.latent_dim,
-            seq_length=self.seq_length,
-            input_dim=self.input_dim,
-            kl_weight=self.kl_weight,
-            dropout_rate=self.dropout_rate,
-            action_dim=self.action_dim
-        )
-        
         # 检测是否为图像输入并设置图像编码器和解码器
-        self.setup_image_processors()
-        
-        return self
-    
-    def setup_image_processors(self):
-        """
-        检测输入是否为图像，并设置相应的图像处理器
-        """
-        # 如果输入维度是三维的 (C, H, W)，则认为是图像输入
+        self.input_dim = input_dim
         if isinstance(self.input_dim, tuple) and len(self.input_dim) == 3:
             self.is_image_input = True
             c, h, w = self.input_dim
@@ -223,6 +124,88 @@ class AutoencoderModel(nn.Module):
                 nn.ReLU(),
                 nn.ConvTranspose2d(16, c, kernel_size=3, padding=1),
             )
+            input_dim = self.input_dim[0] * self.input_dim[1] * self.input_dim[2]
+        elif isinstance(self.input_dim, tuple):
+            input_dim = self.input_dim[0]
+        else:
+            input_dim = self.input_dim
+        self.output_dim = output_dim if output_dim is not None else input_dim
+        self.action_dim = action_dim
+        
+        if self.encoder_type == "lstm":
+            # LSTM编码器
+            self.encoder = nn.LSTM(
+                input_size=input_dim,
+                hidden_size=self.latent_dim,
+                num_layers=2,
+                batch_first=True,
+                dropout=self.dropout_rate,
+                bidirectional=True
+            )
+            
+            # LSTM解码器
+            self.decoder = nn.LSTM(
+                input_size=self.latent_dim,
+                hidden_size=input_dim,
+                num_layers=2,
+                batch_first=True,
+                dropout=self.dropout_rate,
+                bidirectional=False
+            )
+            
+            # 输出层
+            self.output_layer = nn.Linear(input_dim, input_dim)
+            
+            # 隐空间映射（双向LSTM输出到单向输入）
+            self.hidden_map = nn.Linear(self.latent_dim * 2, self.latent_dim)
+            
+        elif self.encoder_type == "transformer":
+            # Transformer编码器
+            encoder_layer = nn.TransformerEncoderLayer(
+                d_model=input_dim,
+                nhead=4,
+                dim_feedforward=self.latent_dim * 4,
+                dropout=self.dropout_rate,
+                batch_first=True
+            )
+            self.encoder = nn.TransformerEncoder(
+                encoder_layer,
+                num_layers=2
+            )
+            
+            # Transformer解码器
+            decoder_layer = nn.TransformerDecoderLayer(
+                d_model=input_dim,
+                nhead=4,
+                dim_feedforward=self.latent_dim * 4,
+                dropout=self.dropout_rate,
+                batch_first=True
+            )
+            self.decoder = nn.TransformerDecoder(
+                decoder_layer,
+                num_layers=2
+            )
+            
+            # 隐空间映射
+            self.hidden_map = nn.Linear(input_dim, self.latent_dim)
+            
+            # 隐空间逆映射
+            self.hidden_unmap = nn.Linear(self.latent_dim, input_dim)
+            
+            # 位置编码
+            self.position_embedding = nn.Parameter(
+                torch.zeros(1, self.seq_length, input_dim)
+            )
+            self._init_position_embedding()
+        
+        else:
+            raise ValueError(f"不支持的编码器类型")
+        
+        if action_dim is not None:
+            self.action_embedding = nn.Embedding(action_dim, action_dim)
+            self.action_linear = nn.Linear(action_dim, action_dim)
+        
+        return self
     
     def encode(self, x):
         """

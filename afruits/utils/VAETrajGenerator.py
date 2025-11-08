@@ -27,7 +27,6 @@ class VAETrajGenerator:
                  seq_length: int = 120,
                  kl_weight: float = 0.001,
                  recon_loss_type: str = "mse",
-                 physics_constraints: dict = None,
                  dropout: float = 0.2,
                  im_embd: int = 128,
                  discrete_action: bool = False):
@@ -57,7 +56,7 @@ class VAETrajGenerator:
         self.seq_length = seq_length
         self.kl_weight = kl_weight
         self.recon_loss_type = recon_loss_type
-        self.physics_constraints = physics_constraints if physics_constraints else {}
+        self.physics_constraints = {}
         self.dropout = dropout
         self.im_embd = im_embd
         self.discrete_action = discrete_action
@@ -87,7 +86,7 @@ class VAETrajGenerator:
         data = self.dataloader_util.load_expert_data(data, batch_size)
         return data
     
-    def build_model(self, input_dim: Union[int, Dict]) -> Tuple[nn.Module, nn.Module]:
+    def build_model(self, state_dim, action_dim) -> Tuple[nn.Module, nn.Module]:
         """
         模型构建
         
@@ -105,10 +104,12 @@ class VAETrajGenerator:
         image_shape = None
         
         # 新格式：分别包含状态和动作维度
+        if isinstance(state_dim, tuple) and len(state_dim) == 1:
+            state_dim = state_dim[0]
         has_separate_action = True
-        state_dim = input_dim['state_dim']
-        action_dim = input_dim['action_dim']
-        total_dim = input_dim['total_dim']
+        state_dim = state_dim
+        action_dim = action_dim
+        total_dim = state_dim + action_dim
         
         # 检查状态是否为图像（四维张量）
         if isinstance(state_dim, tuple) and len(state_dim) == 3:

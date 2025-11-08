@@ -141,7 +141,7 @@ class BehaviorCloner:
         
         return features
     
-    def train_model(self, X_train: np.ndarray, y_train: np.ndarray, validation_split: float = 0.2) -> Dict:
+    def train_model(self, X_train: np.ndarray, y_train: np.ndarray, input_dim, output_dim, validation_split: float = 0.2) -> Dict:
         """
         模型训练函数
         
@@ -183,15 +183,9 @@ class BehaviorCloner:
         train_loader = DataLoader(train_dataset, batch_size=self.batch_size, shuffle=True)
         val_loader = DataLoader(val_dataset, batch_size=self.batch_size)
         
-        print(X_train.shape, y_train.shape)
+        if type(input_dim) == tuple:
+            input_dim = np.prod(input_dim)
         # 创建模型
-        if len(X_train.shape) >= 3:
-            input_dim = X_train.shape[1] * X_train.shape[2] * X_train.shape[3] if len(X_train.shape) == 4 else X_train.shape[1] * X_train.shape[2]
-        else:
-            input_dim = X_train.shape[1] # 展平输入特征
-        # output_dim = y_train.shape[1]  # 输出动作维度
-        output_dim = int(max(y_train) + 1)  # 离散动作维度
-        
         if self.network_type == "MLP":
             # 创建MLP模型
             self.model = nn.Sequential(

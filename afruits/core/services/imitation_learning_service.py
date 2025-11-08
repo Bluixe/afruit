@@ -143,7 +143,6 @@ class ImitationLearningService:
         # 创建模型
         encoder_type = model_config.get('encoder_type', 'lstm')
         latent_dim = model_config.get('latent_dim', 32)
-        input_dim = model_config.get('input_dim', 512)
         kl_weight = model_config.get('kl_weight', 0.001)
         dropout_rate = model_config.get('dropout_rate', 0.2)
         
@@ -151,10 +150,14 @@ class ImitationLearningService:
         model = AutoencoderModel(
             encoder_type=encoder_type,
             latent_dim=latent_dim,
-            input_dim=input_dim,
             kl_weight=kl_weight,
             dropout_rate=dropout_rate
         )
+
+        data, state_dim, action_dim = expert_trajectories["data"], expert_trajectories["state_dim"], expert_trajectories["action_dim"]
+
+        # 构建模型
+        model.build_model(state_dim, action_dim)
         
         # 提取训练参数
         epochs = model_config.get('epochs', 100)
@@ -162,7 +165,7 @@ class ImitationLearningService:
         learning_rate = model_config.get('learning_rate', 1e-4)
         
         # 准备数据加载器
-        data_loader = model.load_sequences(expert_trajectories, batch_size=batch_size)
+        data_loader = model.load_sequences(data, batch_size=batch_size)
         
         # 训练模型
         training_history = model.train(data_loader, epochs=epochs, learning_rate=learning_rate)
@@ -184,20 +187,33 @@ class ImitationLearningService:
         self.logger.info("使用Transformer训练方法")
         
         # 创建模型
-        model = self._create_model('TransformerModel', model_config)
+        d_model = model_config.get('d_model', 128)
+        num_heads = model_config.get('num_heads', 4)
+        num_layers = model_config.get('num_layers', 3)
+        max_seq_len = model_config.get('max_seq_len', 100)
+        dropout_rate = model_config.get('dropout_rate', 0.2)
+        
+        # 创建Transformer模型
+        model = TransformerModel(
+            d_model=d_model,
+            num_heads=num_heads,
+            num_layers=num_layers,
+            max_seq_len=max_seq_len,
+            dropout_rate=dropout_rate
+        )
+
+        data, state_dim, action_dim = expert_trajectories["data"], expert_trajectories["state_dim"], expert_trajectories["action_dim"]
+        model.build_model(state_dim, action_dim)
         
         # 提取训练参数
         epochs = model_config.get('epochs', 100)
         batch_size = model_config.get('batch_size', 32)
         learning_rate = model_config.get('learning_rate', 1e-4)
         
-        # 准备数据
-        # 注意：TransformerModel的load_sequences方法可能需要特殊处理
-        # 这里假设数据已经是正确的格式，或者在模型内部进行了处理
-        data_loader = model.load_sequences(expert_trajectories, batch_size=batch_size)
+        data_loader = model.load_sequences(data, batch_size=batch_size)
         
         # 训练模型
-        training_history = model.train(data_loader, epochs=epochs, learning_rate=learning_rate)
+        training_history = model.train_model(data_loader, epochs=epochs, learning_rate=learning_rate)
         
         # 提取训练指标
         metrics = {
@@ -215,8 +231,20 @@ class ImitationLearningService:
         """扩散轨迹生成器训练方法"""
         self.logger.info("使用扩散模型训练方法")
         
-        # 创建模型
-        model = self._create_model('DiffusionTrajGenerator', model_config)
+        diffusion_steps = model_config.get('diffusion_steps', 1000)
+        noise_schedule = model_config.get('noise_schedule', 'cosine')
+        seq_length = model_config.get('seq_length', 120)
+        dropout = model_config.get('dropout', 0.2)
+        im_embd = model_config.get('im_embd', 128)
+        
+        # 创建扩散轨迹生成器
+        model = DiffusionTrajGenerator(
+            diffusion_steps=diffusion_steps,
+            noise_schedule=noise_schedule,
+            seq_length=seq_length,
+            dropout=dropout,
+            im_embd=im_embd
+        )
         
         # 提取训练参数
         epochs = model_config.get('epochs', 100)
@@ -225,23 +253,10 @@ class ImitationLearningService:
         # 准备数据
         # DiffusionTrajGenerator需要特殊的数据处理
         # 首先检查数据是否已经是DataLoader格式
-        if 'dataloader' in expert_trajectories:
-            data_loader = expert_trajectories['dataloader']
-        else:
-            # 否则，使用模型的load_dataset方法加载数据
-            # 这里假设expert_trajectories中包含data_path
-            data_path = expert_trajectories.get('data_path')
-            if not data_path:
-                # 如果没有data_path，可能需要先将数据保存到临时文件
-                import tempfile
-                import numpy as np
-                
-                temp_dir = tempfile.mkdtemp()
-                data_path = f"{temp_dir}/temp_trajectories.npz"
-                np.savez(data_path, trajectories=expert_trajectories.get('trajectories', []))
-            
-            data_info = model.load_dataset(data_path, seq_len=model_config.get('seq_length'))
-            data_loader = data_info['dataloader']
+        data, state_dim, action_dim = expert_trajectories["data"], expert_trajectories["state_dim"], expert_trajectories["action_dim"]
+        
+        model.build_network(state_dim)
+        data_loader = model.load_dataset(data, batch_size=batch_size)
         
         # 确保模型网络已构建
         if not hasattr(model, 'model') or model.model is None:
@@ -266,39 +281,30 @@ class ImitationLearningService:
     def _train_vae(self, expert_trajectories: Dict, model_config: Dict) -> Tuple[Any, Dict]:
         """VAE轨迹生成器训练方法"""
         self.logger.info("使用VAE训练方法")
+        latent_dim = model_config.get('latent_dim', 64)
+        seq_length = model_config.get('seq_length', 120)
+        kl_weight = model_config.get('kl_weight', 0.001)
+        recon_loss_type = model_config.get('recon_loss_type', 'mse')
+        dropout = model_config.get('dropout', 0.2)
+        im_embd = model_config.get('im_embd', 128)
         
-        # 创建模型
-        model = self._create_model('VAETrajGenerator', model_config)
+        # 创建VAE轨迹生成器
+        model = VAETrajGenerator(
+            latent_dim=latent_dim,
+            seq_length=seq_length,
+            kl_weight=kl_weight,
+            recon_loss_type=recon_loss_type,
+            dropout=dropout,
+            im_embd=im_embd
+        )
+
+        data, state_dim, action_dim = expert_trajectories["data"], expert_trajectories["state_dim"], expert_trajectories["action_dim"]
         
+        model.build_model(state_dim, action_dim)
         # 提取训练参数
         epochs = model_config.get('epochs', 100)
         batch_size = model_config.get('batch_size', 32)
-        
-        # 准备数据
-        # VAETrajGenerator需要特殊的数据处理
-        # 首先检查数据是否已经是DataLoader格式
-        if 'dataloader' in expert_trajectories:
-            data_loader = expert_trajectories['dataloader']
-        else:
-            # 否则，使用模型的load_dataset方法加载数据
-            # 这里假设expert_trajectories中包含data_path
-            data_path = expert_trajectories.get('data_path')
-            if not data_path:
-                # 如果没有data_path，可能需要先将数据保存到临时文件
-                import tempfile
-                import numpy as np
-                
-                temp_dir = tempfile.mkdtemp()
-                data_path = f"{temp_dir}/temp_trajectories.npz"
-                np.savez(data_path, trajectories=expert_trajectories.get('trajectories', []))
-            
-            data_info = model.load_dataset(data_path, batch_size=batch_size)
-            data_loader = data_info['dataloader']
-        
-        # 确保模型网络已构建
-        if not hasattr(model, 'encoder') or model.encoder is None:
-            input_dim = expert_trajectories.get('feature_dim', model_config.get('input_dim', 32))
-            model.build_model(input_dim)
+        data_loader = model.load_dataset(data, batch_size=batch_size)
         
         # 训练模型
         training_history = model.train(data_loader, epochs=epochs)
@@ -566,19 +572,6 @@ class ImitationLearningService:
                 latent_dim=latent_dim,
                 sequence_length=sequence_length,
                 discrete_action=discrete_action
-            )
-            
-        elif model_type == 'AdversarialImitationLearner':
-            # 提取对抗模仿学习器参数
-            state_dim = model_config.get('state_dim', 32)
-            action_dim = model_config.get('action_dim', 8)
-            hidden_dim = model_config.get('hidden_dim', 128)
-            
-            # 创建对抗模仿学习器
-            model = AdversarialImitationLearner(
-                state_dim=state_dim,
-                action_dim=action_dim,
-                hidden_dim=hidden_dim
             )
             
         else:

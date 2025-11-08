@@ -169,7 +169,7 @@ class OfflineRLearner:
         print(f"数据预处理完成: 共添加 {len(buffer)} 条数据到ReplayBuffer")
         return buffer
     
-    def build_model(self, args: Dict = None) -> None:
+    def build_model(self, state_dim, action_dim) -> None:
         """
         模型构建函数
         
@@ -182,19 +182,18 @@ class OfflineRLearner:
             3. 创建策略（CQL或BCQ）
             4. 设置优化器
         """
-        if args is None:
-            args = {}
         
         # 设置默认参数
-        default_args = {
+        args = {
             "n_embd": 128,
             "dropout": 0.1
         }
-        
-        # 更新参数
-        for key, value in default_args.items():
-            if key not in args:
-                args[key] = value
+
+        if type(state_dim) == tuple:
+            self.state_dim = state_dim[0]
+        else:
+            self.state_dim = state_dim
+        self.action_dim = action_dim
         
         # 创建Q网络模型
         self.model = QValueNet(

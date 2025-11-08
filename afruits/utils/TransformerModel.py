@@ -21,8 +21,6 @@ class TransformerModel(nn.Module):
     """
     
     def __init__(self,
-                 input_dim=32,        # 输入特征维度
-                 action_dim=6,        # 动作维度
                  d_model=128,         # 模型隐藏层维度
                  num_heads=4,         # 注意力头数量
                  num_layers=3,        # Transformer层数
@@ -46,8 +44,8 @@ class TransformerModel(nn.Module):
         """
         super(TransformerModel, self).__init__()
         
-        self.input_dim = input_dim
-        self.action_dim = action_dim
+        self.input_dim = None
+        self.action_dim = None
         self.d_model = d_model
         self.num_heads = num_heads
         self.num_layers = num_layers
@@ -145,7 +143,7 @@ class TransformerModel(nn.Module):
         data = self.dataloader_util.load_expert_data(raw_data, batch_size)
         return data
     
-    def build_model(self, input_dim, output_dim, encoder_type="str", decoder_type="fc"):
+    def build_model(self, input_dim, output_dim):
         """
         构建模型
         
@@ -158,6 +156,8 @@ class TransformerModel(nn.Module):
         返回:
             tuple: (encoder, decoder)
         """
+        if isinstance(input_dim, tuple) and len(input_dim) == 1:
+            input_dim = input_dim[0]
         self.input_dim = input_dim
         self.output_dim = output_dim
         
@@ -175,11 +175,7 @@ class TransformerModel(nn.Module):
             self.input_embedding = nn.Linear(self.input_dim, self.d_model)
         
         # 输出层
-        if decoder_type == "fc":
-            self.output_layer = nn.Linear(self.d_model, output_dim)
-        else:
-            # 可以实现其他类型的解码器
-            self.output_layer = nn.Linear(self.d_model, output_dim)
+        self.output_layer = nn.Linear(self.d_model, output_dim)
         
         return self
     

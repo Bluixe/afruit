@@ -24,7 +24,6 @@ class DiffusionTrajGenerator:
     def __init__(self,
                  diffusion_steps: int = 1000,
                  noise_schedule: str = "cosine",
-                 physics_constraints: dict = None,
                  seq_length: int = 120,
                  dropout: float = 0.2,
                  im_embd: int = 128):
@@ -34,7 +33,6 @@ class DiffusionTrajGenerator:
         参数:
             diffusion_steps (int): 扩散步数，取值范围10-2000
             noise_schedule (str): 噪声调度类型，可选["linear", "cosine"]
-            physics_constraints (dict): 物理规则约束字典
             seq_length (int): 输入序列长度，取值范围60-300
             dropout (float): Dropout比率，用于CNN图像编码器
             im_embd (int): 图像嵌入维度，用于CNN图像编码器输出
@@ -48,7 +46,7 @@ class DiffusionTrajGenerator:
         # 初始化参数
         self.diffusion_steps = diffusion_steps
         self.noise_schedule = noise_schedule
-        self.physics_constraints = physics_constraints if physics_constraints else {}
+        self.physics_constraints = {}
         self.seq_length = seq_length
         self.dropout = dropout
         self.im_embd = im_embd
@@ -106,7 +104,7 @@ class DiffusionTrajGenerator:
         data = self.dataloader_util.load_expert_data(data, batch_size)
         return data
     
-    def build_network(self, input_dim: Union[int, Dict], cond_dim: int = 0) -> nn.Module:
+    def build_network(self, state_dim, cond_dim: int = 0) -> nn.Module:
         """
         构建网络
         
@@ -118,32 +116,16 @@ class DiffusionTrajGenerator:
             model (nn.Module): 扩散模型网络
         """
         # 处理输入维度
-        has_separate_action = False
-        state_dim = None
-        action_dim = None
-        is_image_state = False
-        image_shape = None
-        total_dim = None
-        
-        # 检查输入维度类型
-        if isinstance(input_dim, dict):
-            # 新格式：分别包含状态和动作维度
-            has_separate_action = True
-            state_dim = input_dim['state_dim']
-            action_dim = input_dim['action_dim']
-            total_dim = input_dim['total_dim']
-        
+        if isinstance(state_dim, tuple):
+            assert len(state_dim) == 1, "state_dim元组长度必须为1"
+            state_dim = state_dim[0]
+
         # 构建U-Net结构的扩散模型
         class DiffusionUNet(nn.Module):
-            def __init__(self, total_dim, cond_dim, time_emb_dim=128, has_separate_action=False,
-                         state_dim=None, action_dim=None, is_image_state=False, image_shape=None,
-                         dropout=0.2, im_embd=128):
+            def __init__(self, total_dim, cond_dim, time_emb_dim=128,
+                         dropout=0.2):
                 super().__init__()
                 self.total_dim = total_dim
-                self.has_separate_action = has_separate_action
-                self.state_dim = state_dim
-                self.action_dim = action_dim
-                self.image_shape = image_shape
                 self.dropout = dropout
                 
                 # 时间嵌入
@@ -175,21 +157,11 @@ class DiffusionTrajGenerator:
                 )
                 
                 # 解码器
-                if has_separate_action:
-                    # 分别输出状态和动作
-                    self.decoder_common = nn.ModuleList([
-                        nn.Linear(512 + 256, 256),
-                        nn.Linear(256 + 128, 128),
-                    ])
-                    self.decoder_state = nn.Linear(128 + total_dim, state_dim)
-                    self.decoder_action = nn.Linear(128 + total_dim, action_dim)
-                else:
-                    # 单一输出
-                    self.decoder = nn.ModuleList([
-                        nn.Linear(512 + 256, 256),
-                        nn.Linear(256 + 128, 128),
-                        nn.Linear(128 + total_dim, total_dim),
-                    ])
+                self.decoder = nn.ModuleList([
+                    nn.Linear(512 + 256, 256),
+                    nn.Linear(256 + 128, 128),
+                    nn.Linear(128 + total_dim, total_dim),
+                ])
                 
                 # 激活函数
                 self.act = nn.SiLU()
@@ -218,37 +190,16 @@ class DiffusionTrajGenerator:
                 h = self.middle(h)
                 
                 # 解码器前向传播
-                if self.has_separate_action:
-                    # 共享解码器层
-                    for i, layer in enumerate(self.decoder_common):
-                        h = torch.cat([h, skip_connections[-(i+1)]], dim=-1)
-                        h = self.act(layer(h))
-                    
-                    # 最后一层分别输出状态和动作
-                    h_final = torch.cat([h, skip_connections[-(len(self.decoder_common)+1)]], dim=-1)
-                    state_output = self.decoder_state(h_final)
-                    action_output = self.decoder_action(h_final)
-                    
-                    return state_output, action_output
-                else:
-                    # 单一输出
-                    for i, layer in enumerate(self.decoder):
-                        h = torch.cat([h, skip_connections[-(i+1)]], dim=-1)
-                        h = self.act(layer(h)) if i < len(self.decoder) - 1 else layer(h)
-                    
-                    return h
+                for i, layer in enumerate(self.decoder):
+                    h = torch.cat([h, skip_connections[-(i+1)]], dim=-1)
+                    h = self.act(layer(h)) if i < len(self.decoder) - 1 else layer(h)
+                
+                return h
         
         # 创建模型
         model = DiffusionUNet(
-            total_dim,
+            state_dim,
             cond_dim,
-            has_separate_action=has_separate_action,
-            state_dim=state_dim,
-            action_dim=action_dim,
-            is_image_state=is_image_state,
-            image_shape=image_shape,
-            dropout=self.dropout,
-            im_embd=self.im_embd
         )
         model = model.to(self.device)
         
@@ -257,12 +208,7 @@ class DiffusionTrajGenerator:
         self.scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(self.optimizer, T_max=200)
         
         # 保存模型配置
-        self.has_separate_action = has_separate_action
         self.state_dim = state_dim
-        self.action_dim = action_dim
-        self.is_image_state = is_image_state
-        self.image_shape = image_shape
-        self.total_dim = total_dim
         
         self.model = model
         return model
@@ -291,70 +237,30 @@ class DiffusionTrajGenerator:
             
             for batch in dataloader:
                 # 获取轨迹数据
-                if len(batch) == 2 and self.has_separate_action:
-                    # 分别获取状态和动作数据
-                    states = batch[0].to(self.device)
-                    actions = batch[1].to(self.device)
-                    batch_size = states.shape[0]
-                    
-                    # 随机选择时间步
-                    t = torch.randint(0, self.diffusion_steps, (batch_size,), device=self.device)
-                    
-                    # 添加噪声到状态
-                    state_noise = torch.randn_like(states)
-                    alphas_cumprod_t = torch.tensor(self.alphas_cumprod, device=self.device)[t]
-                    
-                    # 调整形状以匹配状态维度
-                    if len(states.shape) == 3:  # [batch_size, seq_len, state_dim]
-                        alphas_cumprod_t = alphas_cumprod_t.view(-1, 1, 1)
-                    else:  # [batch_size, state_dim]
-                        alphas_cumprod_t = alphas_cumprod_t.view(-1, 1)
-                    
-                    noisy_states = torch.sqrt(alphas_cumprod_t) * states + \
-                                  torch.sqrt(1 - alphas_cumprod_t) * state_noise
-                    
-                    # 添加噪声到动作
-                    action_noise = torch.randn_like(actions)
-                    noisy_actions = torch.sqrt(alphas_cumprod_t) * actions + \
-                                   torch.sqrt(1 - alphas_cumprod_t) * action_noise
-                    
-                    # 预测噪声
-                    predicted_state_noise, predicted_action_noise = self.model(
-                        x_state=noisy_states,
-                        x_action=noisy_actions,
-                        t=t / self.diffusion_steps
-                    )
-                    
-                    # 计算损失
-                    state_loss = self.loss_fn(predicted_state_noise, state_noise)
-                    action_loss = self.loss_fn(predicted_action_noise, action_noise)
-                    loss = state_loss + action_loss
-                else:
-                    # 旧格式：单一轨迹数据
-                    trajectories = batch[0].to(self.device)
-                    batch_size = trajectories.shape[0]
-                    
-                    # 随机选择时间步
-                    t = torch.randint(0, self.diffusion_steps, (batch_size,), device=self.device)
-                    
-                    # 添加噪声
-                    noise = torch.randn_like(trajectories)
-                    alphas_cumprod_t = torch.tensor(self.alphas_cumprod, device=self.device)[t]
-                    
-                    # 调整形状以匹配轨迹维度
-                    if len(trajectories.shape) == 3:  # [batch_size, seq_len, feature_dim]
-                        alphas_cumprod_t = alphas_cumprod_t.view(-1, 1, 1)
-                    else:  # [batch_size, feature_dim]
-                        alphas_cumprod_t = alphas_cumprod_t.view(-1, 1)
-                    
-                    noisy_trajectories = torch.sqrt(alphas_cumprod_t) * trajectories + \
-                                        torch.sqrt(1 - alphas_cumprod_t) * noise
-                    
-                    # 预测噪声
-                    predicted_noise = self.model(x_state=noisy_trajectories, t=t / self.diffusion_steps)
-                    
-                    # 计算损失
-                    loss = self.loss_fn(predicted_noise, noise)
+                trajectories = batch[0].to(self.device)
+                batch_size = trajectories.shape[0]
+                
+                # 随机选择时间步
+                t = torch.randint(0, self.diffusion_steps, (batch_size,), device=self.device)
+                
+                # 添加噪声
+                noise = torch.randn_like(trajectories)
+                alphas_cumprod_t = torch.tensor(self.alphas_cumprod, device=self.device)[t]
+                
+                # 调整形状以匹配轨迹维度
+                if len(trajectories.shape) == 3:  # [batch_size, seq_len, feature_dim]
+                    alphas_cumprod_t = alphas_cumprod_t.view(-1, 1, 1)
+                else:  # [batch_size, feature_dim]
+                    alphas_cumprod_t = alphas_cumprod_t.view(-1, 1)
+                
+                noisy_trajectories = torch.sqrt(alphas_cumprod_t) * trajectories + \
+                                    torch.sqrt(1 - alphas_cumprod_t) * noise
+                
+                # 预测噪声
+                predicted_noise = self.model(x_state=noisy_trajectories, t=t / self.diffusion_steps)
+                
+                # 计算损失
+                loss = self.loss_fn(predicted_noise, noise)
                 
                 # 反向传播
                 self.optimizer.zero_grad()
@@ -380,8 +286,7 @@ class DiffusionTrajGenerator:
             'epochs': epochs
         }
     
-    def generate(self, batch_size: int = 1, cond_data: torch.Tensor = None,
-                 validity_flag: bool = True) -> Dict:
+    def generate(self, batch_size: int = 1, cond_data: torch.Tensor = None) -> Dict:
         """
         生成轨迹
         
@@ -392,103 +297,44 @@ class DiffusionTrajGenerator:
             
         返回:
             生成结果 (Dict)
-                - state: 状态序列（当has_separate_action为True时）
-                - action: 动作序列（当has_separate_action为True时）
-                - trajectories: 轨迹动作序列（当has_separate_action为False时）
-                - validity_flags: 物理规则合规标记
         """
         if self.model is None:
             raise ValueError("请先调用build_network构建模型")
         
         self.model.eval()
+        input_shape = next(self.model.parameters()).shape
+        traj_dim = input_shape[0] if len(input_shape) == 1 else input_shape[1]
         
-        if self.has_separate_action:
-            # 分别生成状态和动作
-            # 初始化随机噪声
-            x_state = torch.randn((batch_size, self.state_dim), device=self.device)
-            x_action = torch.randn((batch_size, self.action_dim), device=self.device)
+        # 初始化随机噪声
+        x = torch.randn((batch_size, traj_dim), device=self.device)
+        
+        # 逐步去噪
+        for i in reversed(range(self.diffusion_steps)):
+            t = torch.ones(batch_size, device=self.device) * i / self.diffusion_steps
             
-            # 逐步去噪
-            for i in reversed(range(self.diffusion_steps)):
-                t = torch.ones(batch_size, device=self.device) * i / self.diffusion_steps
+            # 无梯度计算
+            with torch.no_grad():
+                # 预测噪声
+                predicted_noise = self.model(x_state=x, t=t, cond=cond_data)
                 
-                # 无梯度计算
-                with torch.no_grad():
-                    # 预测噪声
-                    predicted_state_noise, predicted_action_noise = self.model(
-                        x_state=x_state,
-                        x_action=x_action,
-                        t=t,
-                        cond=cond_data
-                    )
-                    
-                    # 计算去噪步骤
-                    alpha = self.alphas[i]
-                    alpha_cumprod = self.alphas_cumprod[i]
-                    beta = self.betas[i]
-                    
-                    if i > 0:
-                        state_noise = torch.randn_like(x_state)
-                        action_noise = torch.randn_like(x_action)
-                    else:
-                        state_noise = torch.zeros_like(x_state)
-                        action_noise = torch.zeros_like(x_action)
-                    
-                    # 更新状态
-                    x_state = (1 / torch.sqrt(torch.tensor(alpha))) * (
-                        x_state - ((1 - alpha) / torch.sqrt(1 - alpha_cumprod)) * predicted_state_noise
-                    ) + torch.sqrt(beta) * state_noise
-                    
-                    # 更新动作
-                    x_action = (1 / torch.sqrt(torch.tensor(alpha))) * (
-                        x_action - ((1 - alpha) / torch.sqrt(1 - alpha_cumprod)) * predicted_action_noise
-                    ) + torch.sqrt(beta) * action_noise
-            
-            # 如果状态是图像，需要进行后处理
-            if self.is_image_state:
-                # 这里可以添加将状态转换回图像格式的代码
-                pass
-            
-            return {
-                'state': x_state.cpu().numpy(),
-                'action': x_action.cpu().numpy(),
-            }
-        else:
-            # 旧格式：单一轨迹生成
-            # 获取模型输入维度
-            input_shape = next(self.model.parameters()).shape
-            traj_dim = input_shape[0] if len(input_shape) == 1 else input_shape[1]
-            
-            # 初始化随机噪声
-            x = torch.randn((batch_size, traj_dim), device=self.device)
-            
-            # 逐步去噪
-            for i in reversed(range(self.diffusion_steps)):
-                t = torch.ones(batch_size, device=self.device) * i / self.diffusion_steps
+                # 计算去噪步骤
+                alpha = self.alphas[i]
+                alpha_cumprod = self.alphas_cumprod[i]
+                beta = self.betas[i]
                 
-                # 无梯度计算
-                with torch.no_grad():
-                    # 预测噪声
-                    predicted_noise = self.model(x_state=x, t=t, cond=cond_data)
-                    
-                    # 计算去噪步骤
-                    alpha = self.alphas[i]
-                    alpha_cumprod = self.alphas_cumprod[i]
-                    beta = self.betas[i]
-                    
-                    if i > 0:
-                        noise = torch.randn_like(x)
-                    else:
-                        noise = torch.zeros_like(x)
-                    
-                    # 更新x
-                    x = (1 / torch.sqrt(torch.tensor(alpha))) * (
-                        x - ((1 - alpha) / torch.sqrt(1 - alpha_cumprod)) * predicted_noise
-                    ) + torch.sqrt(beta) * noise
-            
-            return {
-                'trajectories': x.cpu().numpy(),
-            }
+                if i > 0:
+                    noise = torch.randn_like(x)
+                else:
+                    noise = torch.zeros_like(x)
+                
+                # 更新x
+                x = (1 / torch.sqrt(torch.tensor(alpha))) * (
+                    x - ((1 - alpha) / torch.sqrt(1 - alpha_cumprod)) * predicted_noise
+                ) + torch.sqrt(beta) * noise
+        
+        return {
+            'trajectories': x.cpu().numpy(),
+        }
     
     def _check_physics_validity(self, data: Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]) -> torch.Tensor:
         """
@@ -545,69 +391,6 @@ class DiffusionTrajGenerator:
         
         return validity_flags
     
-    def next_process(self, raw_data: Union[torch.Tensor, Dict[str, torch.Tensor]],
-                    violation_threshold: float = 0.3) -> Dict:
-        """
-        后处理
-        
-        参数:
-            raw_data (torch.Tensor or Dict): 原始生成数据，可以是轨迹张量或包含state和action的字典
-            violation_threshold (float): 违规阈值
-            
-        返回:
-            处理结果 (Dict)
-        """
-        if self.has_separate_action:
-            # 处理分离的状态和动作
-            if isinstance(raw_data, dict) and 'state' in raw_data and 'action' in raw_data:
-                # 获取状态和动作
-                states = raw_data['state'].cpu().numpy() if isinstance(raw_data['state'], torch.Tensor) else raw_data['state']
-                actions = raw_data['action'].cpu().numpy() if isinstance(raw_data['action'], torch.Tensor) else raw_data['action']
-                
-                batch_size = states.shape[0]
-                
-                # 初始化结果
-                valid_states = []
-                valid_actions = []
-                validity_flags = np.ones(batch_size, dtype=bool)
-                
-                # 对每个轨迹进行处理
-                for i in range(batch_size):
-                    # 合并状态和动作以进行物理约束检查
-                    combined_traj = np.concatenate([states[i], actions[i]], axis=-1) if len(states.shape) > 2 else np.concatenate([states[i:i+1], actions[i:i+1]], axis=-1)
-                    
-                    # # 物理约束修正
-                    # corrected_traj = self._apply_physics_correction(combined_traj)
-                    
-                    # # 计算违规率
-                    # violation_rate = self._compute_violation_rate(combined_traj, corrected_traj)
-                    
-                    # # 判断是否有效
-                    # if violation_rate > violation_threshold:
-                    #     validity_flags[i] = False
-                    
-                    # 分离修正后的状态和动作
-                    if len(states.shape) > 2:
-                        state_dim = states.shape[-1]
-                        corrected_state = combined_traj[..., :state_dim]
-                        corrected_action = combined_traj[..., state_dim:]
-                    else:
-                        state_dim = states.shape[-1]
-                        corrected_state = combined_traj[..., :state_dim]
-                        corrected_action = combined_traj[..., state_dim:]
-                    
-                    # 存储修正后的状态和动作
-                    valid_states.append(corrected_state)
-                    valid_actions.append(corrected_action)
-                
-                return {
-                    'state': np.array(valid_states),
-                    'action': np.array(valid_actions),
-                    'validity_flags': validity_flags
-                }
-            else:
-                raise ValueError("当has_separate_action为True时，raw_data必须是包含'state'和'action'键的字典")
-
     def _apply_physics_correction(self, data: Union[np.ndarray, Tuple[np.ndarray, np.ndarray]]) -> Union[np.ndarray, Tuple[np.ndarray, np.ndarray]]:
         """
         应用物理约束修正

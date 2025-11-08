@@ -118,6 +118,9 @@ class AdversarialImitationLearner:
             3. 设置优化器
         """
         # 设置状态和动作维度
+        if type(state_dim) == tuple:
+            assert len(state_dim) == 1, "仅支持一维状态输入" 
+            state_dim = state_dim[0]
         self.state_dim = state_dim
         self.action_dim = action_dim
         
@@ -275,7 +278,7 @@ class AdversarialImitationLearner:
         
         return gradient_penalty
     
-    def train(self, expert_data: Dict, batch_size: int = 64, epochs: int = 100, generator_args: Dict = None, discriminator_args: Dict = None) -> Dict:
+    def train(self, expert_data: Dict, batch_size: int = 64, epochs: int = 100) -> Dict:
         """
         训练函数
         
@@ -299,23 +302,11 @@ class AdversarialImitationLearner:
             4. 返回训练历史记录
         """
         # 检查输入数据
-        print(expert_data.keys())
         if 'states' not in expert_data or 'actions' not in expert_data:
             raise ValueError("expert_data必须包含'expert_states'和'expert_actions'")
         
         expert_states = expert_data['states']
         expert_actions = expert_data['actions']
-        
-        # 根据输入数据的维度构建模型
-        if self.generator is None or self.discriminator is None:
-            state_dim = expert_states.shape[1]  # 状态维度
-            # 如果动作是离散的，我们需要知道动作空间的大小
-            if len(expert_actions.shape) == 1:  # 离散动作 (batch_size,)
-                action_dim = int(max(expert_actions) + 1)  # 动作维度（离散动作）
-            else:  # 连续动作 (batch_size, action_dim)
-                action_dim = expert_actions.shape[1]
-            print(f"根据输入数据构建模型: state_dim={state_dim}, action_dim={action_dim}")
-            self.build_models(state_dim, action_dim, generator_args, discriminator_args)
         
         # 转换为PyTorch张量
         expert_states_tensor = torch.FloatTensor(expert_states).to(self.device)

@@ -63,14 +63,14 @@ class TestBasicAlgorithm(unittest.TestCase):
                 trajectories[f'traj_{i}'] = {
                     'states': states,
                     'actions': actions,
-                    # 'opponent_actions': opponent_actions,
-                    # 'next_states': next_states,
                     'rewards': np.random.rand(20),  # 随机奖励
                     'dones': np.zeros(20),  # 完成标志
                     'infos': [{} for _ in range(20)]  # 额外信息
                 }
         
-        return trajectories
+        return {"data": trajectories,
+                "state_dim": (10,),
+                "action_dim": 5}
     
     def create_game_modeling_test_data(self, algorithm_type='BehaviorCloner'):
         """创建博弈建模测试数据"""
@@ -110,13 +110,13 @@ class TestBasicAlgorithm(unittest.TestCase):
                 test_trajectories[f'traj_{i}'] = {
                     'states': states,
                     'actions': actions,
-                    # 'opponent_actions': opponent_actions,
-                    # 'next_states': next_states,
                     'rewards': np.random.rand(20),  # 随机奖励
                     'dones': np.zeros(20),  # 完成标志
                     'infos': [{} for _ in range(20)]  # 额外信息
                 }
-        return test_trajectories
+        return {"data": test_trajectories,
+                "state_dim": (10,),
+                "action_dim": 5}
     
     #---------- 测试方法 ----------#
     

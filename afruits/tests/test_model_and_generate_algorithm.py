@@ -34,14 +34,18 @@ class TestModelAndGenerateAlgorithm(unittest.TestCase):
         for i in range(10):
             # 每条轨迹包含40个时间步
             states = np.random.rand(40, 10)  # 10维状态空间
-            actions = np.random.rand(40, 5)  # 5维动作空间
+            # 离散动作空间，动作维度为5
+            actions = np.random.randint(0, 5, size=(40,))  # 离散动作空间
             
             trajectories.append({
                 'states': states,
                 'actions': actions,
             })
         
-        return trajectories
+        return {"data": trajectories,
+                "state_dim": (10,),
+                "action_dim": 5}
+    
     
     def create_trajectory_test_data(self):
         """创建轨迹测试数据"""
@@ -50,16 +54,19 @@ class TestModelAndGenerateAlgorithm(unittest.TestCase):
         
         # 创建5条测试轨迹
         for i in range(5):
-            # 每条轨迹包含20个时间步
+            # 每条轨迹包含40个时间步
             states = np.random.rand(40, 10)  # 10维状态空间
-            actions = np.random.rand(40, 5)  # 5维动作空间
+            # 离散动作空间，动作维度为5
+            actions = np.random.randint(0, 5, size=(40,))  # 离散动作空间
             
             test_trajectories.append({
                 'states': states,
                 'actions': actions,
             })
         
-        return test_trajectories
+        return {"data": test_trajectories,
+                "state_dim": (10,),
+                "action_dim": 5}
     
     #---------- 测试方法 ----------#
     

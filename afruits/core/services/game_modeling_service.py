@@ -122,11 +122,12 @@ class GameModelingService:
             dropout_rate=dropout_rate
         )
         
+        data, state_dim, action_dim = training_data["data"], training_data["state_dim"], training_data["action_dim"]
         # 处理数据
-        X_train, y_train = model.process_data(training_data, context_frames=context_frames)
+        X_train, y_train = model.process_data(data, context_frames=context_frames)
         
         # 训练模型
-        training_history = model.train_model(X_train, y_train, validation_split=validation_split)
+        training_history = model.train_model(X_train, y_train, state_dim, action_dim, validation_split=validation_split)
         
         # 提取训练指标
         metrics = {
@@ -168,11 +169,13 @@ class GameModelingService:
             reward_normalization=reward_normalization,
         )
 
+        data, state_dim, action_dim = training_data["data"], training_data["state_dim"], training_data["action_dim"]
+
         # 预处理数据
-        training_data = model.preprocess_data(training_data)
+        training_data = model.preprocess_data(data)
 
         # 构建模型
-        model.build_model()
+        model.build_model(state_dim, action_dim)
         
         # 训练模型
         training_history = model.train(training_data)
@@ -210,8 +213,10 @@ class GameModelingService:
             importance_beta=importance_beta
         )
         
+        data, state_dim, action_dim = training_data["data"], training_data["state_dim"], training_data["action_dim"]
+        model.build_network(state_dim, action_dim)
         # 预处理数据
-        training_data = model.build_weighted_dataset(training_data)
+        training_data = model.build_weighted_dataset(data)
         # 训练模型
         training_history = model.fictitious_play(training_data, num_iterations=num_iterations)
         
@@ -247,14 +252,11 @@ class GameModelingService:
             gp_lambda=gp_lambda,
             device=self.device
         )
-        
+
+        data, state_dim, action_dim = training_data["data"], training_data["state_dim"], training_data["action_dim"]
+        model.build_models(state_dim, action_dim)
         # 处理数据
-        expert_states, expert_actions = model.preprocess_data(training_data)
-        
-        # # 构建模型
-        # generator_args = model_config.get('generator_args', {})
-        # discriminator_args = model_config.get('discriminator_args', {})
-        # model.build_models(generator_args, discriminator_args)
+        expert_states, expert_actions = model.preprocess_data(data)
         
         # 准备训练数据
         expert_data = {

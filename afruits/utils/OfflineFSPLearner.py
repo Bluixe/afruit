@@ -182,7 +182,7 @@ class OfflineFSPLearner:
         
         return weights
     
-    def build_network(self, input_dim: int, action_dim: int) -> Dict:
+    def build_network(self, input_dim, action_dim: int) -> Dict:
         """
         网络构建函数
         
@@ -197,6 +197,10 @@ class OfflineFSPLearner:
             1. Q网络（CQL）：历史轨迹输入 → GRU时序编码 → 融合动作分布输出
             2. 策略网络：对手模型输入 → Transformer编码层 → 双头策略/价值输出
         """
+        if type(input_dim) == tuple:
+            assert len(input_dim) == 1, "仅支持一维输入" 
+            input_dim = input_dim[0]
+            
         # 创建Q网络
         self.network = nn.Sequential(
             nn.Linear(input_dim, 256),
@@ -255,35 +259,8 @@ class OfflineFSPLearner:
         """
         # 检查网络是否已构建，如果未构建则根据数据集构建
         if self.network is None or self.policy_network is None or self.opponent_model is None:
-            # 从数据集中获取输入维度和动作维度
-            try:
-                # 尝试获取输入维度
-                states = dataset['states']
-                if isinstance(states, np.ndarray):
-                    if len(states.shape) > 1:
-                        input_dim = states.shape[1]  # (n_samples, input_dim)
-                    else:
-                        input_dim = states[0].shape[0]  # 第一个样本的维度
-                else:
-                    # 如果不是numpy数组，尝试获取第一个元素的长度
-                    input_dim = len(states[0])
-                
-                # 尝试获取动作维度
-                actions = dataset['actions']
-                if isinstance(actions, np.ndarray) or isinstance(actions, list):
-                    action_dim = int(max(actions) + 1)
-                        
-                else:
-                    # 默认动作维度
-                    action_dim = 10  # 使用一个合理的默认值
-                
-                print(f"从数据集自动构建网络: 输入维度={input_dim}, 动作维度={action_dim}")
-                
-                # 调用build_network构建网络
-                self.build_network(input_dim, action_dim)
-            except Exception as e:
-                # 如果自动检测失败，抛出更详细的错误
-                raise ValueError(f"无法从数据集自动构建网络: {e}。请手动调用build_network方法。")
+            # 如果自动检测失败，抛出更详细的错误
+            raise ValueError(f"请手动调用build_network方法。")
         
         # 检查数据集
         if not dataset or not isinstance(dataset, dict):
