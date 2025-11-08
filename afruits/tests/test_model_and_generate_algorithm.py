@@ -44,7 +44,8 @@ class TestModelAndGenerateAlgorithm(unittest.TestCase):
         
         return {"data": trajectories,
                 "state_dim": (10,),
-                "action_dim": 5}
+                "action_dim": 5,
+                "traj_length": 80}
     
     
     def create_trajectory_test_data(self):
@@ -66,7 +67,8 @@ class TestModelAndGenerateAlgorithm(unittest.TestCase):
         
         return {"data": test_trajectories,
                 "state_dim": (10,),
-                "action_dim": 5}
+                "action_dim": 5,
+                "traj_length": 80}
     
     #---------- 测试方法 ----------#
     

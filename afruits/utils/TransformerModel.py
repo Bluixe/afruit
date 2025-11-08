@@ -335,6 +335,7 @@ class TransformerTrainer:
             dict: 训练历史
         """
         # 优化器
+        self.model.to(self.device)
         optimizer = torch.optim.Adam(self.model.parameters(), lr=learning_rate)
         
         # 损失函数 - 交叉熵损失用于分类任务

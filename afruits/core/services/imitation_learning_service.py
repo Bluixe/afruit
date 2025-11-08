@@ -292,16 +292,15 @@ class ImitationLearningService:
         # 创建VAE轨迹生成器
         model = VAETrajGenerator(
             latent_dim=latent_dim,
-            seq_length=seq_length,
             kl_weight=kl_weight,
             recon_loss_type=recon_loss_type,
             dropout=dropout,
             im_embd=im_embd
         )
 
-        data, state_dim, action_dim = expert_trajectories["data"], expert_trajectories["state_dim"], expert_trajectories["action_dim"]
+        data, state_dim, action_dim, seq_length = expert_trajectories["data"], expert_trajectories["state_dim"], expert_trajectories["action_dim"], expert_trajectories["traj_length"]
         
-        model.build_model(state_dim, action_dim)
+        model.build_model(state_dim, action_dim, seq_length)
         # 提取训练参数
         epochs = model_config.get('epochs', 100)
         batch_size = model_config.get('batch_size', 32)

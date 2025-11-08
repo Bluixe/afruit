@@ -24,7 +24,6 @@ class VAETrajGenerator:
     
     def __init__(self,
                  latent_dim: int = 64,
-                 seq_length: int = 120,
                  kl_weight: float = 0.001,
                  recon_loss_type: str = "mse",
                  dropout: float = 0.2,
@@ -46,14 +45,13 @@ class VAETrajGenerator:
         """
         # 参数有效性检查
         assert 16 <= latent_dim <= 256, "latent_dim必须在16-256范围内"
-        assert 60 <= seq_length <= 300, "seq_length必须在60-300范围内"
         assert 0.0001 <= kl_weight <= 0.1, "kl_weight必须在0.0001-0.1范围内"
         assert recon_loss_type in ["mse", "mae"], "recon_loss_type必须是'mse'或'mae'"
         assert 0.0 <= dropout <= 0.5, "dropout必须在0.0-0.5范围内"
         
         # 初始化参数
         self.latent_dim = latent_dim
-        self.seq_length = seq_length
+        self.seq_length = None
         self.kl_weight = kl_weight
         self.recon_loss_type = recon_loss_type
         self.physics_constraints = {}
@@ -87,7 +85,7 @@ class VAETrajGenerator:
         data_loader = data['dataloader']
         return data_loader
     
-    def build_model(self, state_dim, action_dim) -> Tuple[nn.Module, nn.Module]:
+    def build_model(self, state_dim, action_dim, seq_length) -> Tuple[nn.Module, nn.Module]:
         """
         模型构建
         
@@ -103,6 +101,7 @@ class VAETrajGenerator:
         action_dim = None
         is_image_state = False
         image_shape = None
+        self.seq_length = seq_length
         
         # 新格式：分别包含状态和动作维度
         if isinstance(state_dim, tuple) and len(state_dim) == 1:

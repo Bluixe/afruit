@@ -167,8 +167,8 @@ class DiffusionTrajGenerator:
                 # 激活函数
                 self.act = nn.SiLU()
                 
-            def forward(self, x_state=None, x_action=None, t=None, cond=None):
-                x = x_state if x_state is not None else x_action
+            def forward(self, x_state=None, t=None, cond=None):
+                x = x_state[:, -1, :]
                 
                 # 时间嵌入
                 t_emb = self.time_embed(t.unsqueeze(-1))
