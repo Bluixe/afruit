@@ -74,10 +74,7 @@ class TransformerModel(nn.Module):
         self.embed_ln = nn.LayerNorm(self.d_model)
         
         # 输出层 - 预测动作
-        self.pred_actions = None
-        
-        # 数据加载器
-        self.dataloader_util = DataLoaderUtil()
+        self.predict_actions = None
         
         # 是否使用图像编码器（将在forward中根据输入维度决定）
         self.use_image_encoder = False
@@ -126,23 +123,6 @@ class TransformerModel(nn.Module):
         # 更新嵌入层
         new_dim = self.input_dim + self.action_dim + 1  # 状态向量 + one-hot动作 + 奖励
         self.embed_transition = nn.Linear(new_dim, self.d_model)
-    
-    def load_sequences(self, raw_data, batch_size=32):
-        """
-        加载序列数据
-        
-        参数:
-            raw_data (dict): 原始数据字典
-            batch_size (int): 批处理大小
-            
-        返回:
-            DataLoader: 数据加载器
-        """
-        # 这里可以实现数据加载逻辑，返回DataLoader
-        # 由于这是一个模型类，实际上数据加载可能在外部完成
-        data = self.dataloader_util.load_expert_data(raw_data, batch_size)
-        data_loader = data['dataloader']
-        return data_loader
     
     def build_model(self, input_dim, output_dim):
         """
@@ -249,12 +229,97 @@ class TransformerModel(nn.Module):
         )
         
         # 预测动作
-        preds = self.pred_actions(transformer_outputs.last_hidden_state)
+        preds = self.predict_actions(transformer_outputs.last_hidden_state)
         
         if output_attentions:
             return preds, transformer_outputs.attentions
         else:
             return preds
+
+
+class TransformerTrainer:
+    """
+    Transformer模型训练器，负责模型的训练、评估和预测。
+    """
+    
+    def __init__(self,
+                 d_model=128,         # 模型隐藏层维度
+                 num_heads=4,         # 注意力头数量
+                 num_layers=3,        # Transformer层数
+                 max_seq_len=100,     # 最大序列长度
+                 dropout_rate=0.2,    # Dropout比率
+                 lr_weight=0.01,      # 信息瓶颈权重
+                 device=None):        # 设备
+        """
+        初始化TransformerModel
+        
+        参数:
+            input_dim (int): 输入特征维度
+            action_dim (int): 动作维度
+            d_model (int): 模型隐藏层维度
+            num_heads (int): 注意力头数量
+            num_layers (int): Transformer层数
+            max_seq_len (int): 最大序列长度
+            dropout_rate (float): Dropout比率
+            lr_weight (float): 信息瓶颈权重
+            device: 计算设备
+        """
+        self.input_dim = None
+        self.action_dim = None
+        self.d_model = d_model
+        self.num_heads = num_heads
+        self.num_layers = num_layers
+        self.max_seq_len = max_seq_len
+        self.dropout_rate = dropout_rate
+        self.lr_weight = lr_weight
+        self.device = device if device is not None else torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        self.im_embd = 64  # 图像嵌入维度
+
+        self.model = TransformerModel(
+            d_model=self.d_model,
+            num_heads=self.num_heads,
+            num_layers=self.num_layers,
+            max_seq_len=self.max_seq_len,
+            dropout_rate=self.dropout_rate,
+            lr_weight=self.lr_weight,
+            device=self.device
+        ).to(self.device)
+
+    def build_model(self, input_dim, output_dim):
+        """
+        构建模型
+        
+        参数:
+            input_dim (int): 输入维度
+            output_dim (int): 输出维度
+            
+        返回:
+            TransformerTrainer: 自身实例
+        """
+        self.input_dim = input_dim
+        self.action_dim = output_dim
+        
+        self.model.build_model(input_dim, output_dim)
+        
+        return self
+
+    def load_sequences(self, raw_data, batch_size=32):
+        """
+        加载序列数据
+        
+        参数:
+            raw_data (dict): 原始数据字典
+            batch_size (int): 批处理大小
+            
+        返回:
+            DataLoader: 数据加载器
+        """
+        # 这里可以实现数据加载逻辑，返回DataLoader
+        # 由于这是一个模型类，实际上数据加载可能在外部完成
+        dataloader_util = DataLoaderUtil()
+        data = dataloader_util.load_expert_data(raw_data, batch_size)
+        data_loader = data['dataloader']
+        return data_loader
     
     def train_model(self, train_loader, val_loader=None, epochs=10, learning_rate=0.001):
         """
@@ -270,7 +335,7 @@ class TransformerModel(nn.Module):
             dict: 训练历史
         """
         # 优化器
-        optimizer = torch.optim.Adam(self.parameters(), lr=learning_rate)
+        optimizer = torch.optim.Adam(self.model.parameters(), lr=learning_rate)
         
         # 损失函数 - 交叉熵损失用于分类任务
         criterion = nn.CrossEntropyLoss()
@@ -284,27 +349,27 @@ class TransformerModel(nn.Module):
         # 训练循环
         for epoch in range(epochs):
             # 训练模式
-            self.train()
+            self.model.train()
             train_loss = 0.0
             
             for batch in train_loader:
                 # 前向传播
-                pred_actions = self(batch)
+                pred_actions = self.model(batch)
                 
                 # 获取真实动作
                 true_actions = batch[1].to(self.device)
                 
                 # 重塑预测和真实动作以适应损失函数
                 true_actions = true_actions.reshape(-1).long()
-                pred_actions = pred_actions.reshape(-1, self.action_dim)
+                pred_actions = pred_actions.reshape(-1, self.model.action_dim)
                 
                 # 计算损失
                 loss = criterion(pred_actions, true_actions)
                 
                 # 添加信息瓶颈正则化
-                if self.lr_weight > 0:
+                if self.model.lr_weight > 0:
                     # 计算注意力权重的熵作为正则化项
-                    _, attentions = self(batch, output_attentions=True)
+                    _, attentions = self.model(batch, output_attentions=True)
                     attention_entropy = 0
                     for attention in attentions:
                         # 计算注意力权重的熵
@@ -312,7 +377,7 @@ class TransformerModel(nn.Module):
                         attention_entropy += entropy
                     
                     # 添加到损失中
-                    loss += self.lr_weight * attention_entropy
+                    loss += self.model.lr_weight * attention_entropy
                 
                 # 反向传播和优化
                 optimizer.zero_grad()
@@ -351,20 +416,20 @@ class TransformerModel(nn.Module):
             criterion = nn.CrossEntropyLoss()
         
         # 评估模式
-        self.eval()
+        self.model.eval()
         eval_loss = 0.0
         
         with torch.no_grad():
             for batch in data_loader:
                 # 前向传播
-                pred_actions = self(batch)
+                pred_actions = self.model(batch)
                 
                 # 获取真实动作
                 true_actions = batch[1].to(self.device)
                 
                 # 重塑预测和真实动作以适应损失函数
                 true_actions = true_actions.reshape(-1).long()
-                pred_actions = pred_actions.reshape(-1, self.action_dim)
+                pred_actions = pred_actions.reshape(-1, self.model.action_dim)
                 
                 # 计算损失
                 loss = criterion(pred_actions, true_actions)
@@ -387,7 +452,7 @@ class TransformerModel(nn.Module):
             torch.Tensor: 预测的动作概率
         """
         # 评估模式
-        self.eval()
+        self.model.eval()
         
         with torch.no_grad():
             # 确保输入是张量并移动到正确的设备
@@ -416,7 +481,7 @@ class TransformerModel(nn.Module):
             batch = [states, dummy_actions]
             
             # 前向传播
-            pred_actions = self(batch)
+            pred_actions = self.model(batch)
             
             # 获取预测的动作概率
             action_probs = torch.softmax(pred_actions, dim=-1)

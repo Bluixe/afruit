@@ -9,7 +9,7 @@ import copy
 
 # 导入轨迹建模与生成模型
 from utils.AutoencoderModel import AutoencoderModel
-from utils.TransformerModel import TransformerModel
+from utils.TransformerModel import TransformerTrainer
 from utils.DiffusionTrajGenerator import DiffusionTrajGenerator
 from utils.VAETrajGenerator import VAETrajGenerator
 
@@ -195,7 +195,7 @@ class ImitationLearningService:
         dropout_rate = model_config.get('dropout_rate', 0.2)
         
         # 创建Transformer模型
-        model = TransformerModel(
+        model = TransformerTrainer(
             d_model=d_model,
             num_heads=num_heads,
             num_layers=num_layers,
@@ -214,7 +214,6 @@ class ImitationLearningService:
         data_loader = model.load_sequences(data, batch_size=batch_size)
         
         # 训练模型
-        model.to(self.device)
         training_history = model.train_model(data_loader, epochs=epochs, learning_rate=learning_rate)
         
         # 提取训练指标
