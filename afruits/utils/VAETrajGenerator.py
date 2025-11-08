@@ -424,9 +424,9 @@ class VAETrajGenerator:
                     # 状态仍使用MSE或MAE
                     print(reconstructed_states.shape, states.shape)
                     if self.recon_loss_type == "mse":
-                        state_recon_loss = F.mse_loss(reconstructed_states, states[:, -1, :])
+                        state_recon_loss = F.mse_loss(reconstructed_states, states)
                     else:  # mae
-                        state_recon_loss = F.l1_loss(reconstructed_states, states[:, -1, :])
+                        state_recon_loss = F.l1_loss(reconstructed_states, states)
                     
                     # 根据动作类型选择损失函数
                     if self.discrete_action:
