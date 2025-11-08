@@ -129,6 +129,8 @@ class AutoencoderModel(nn.Module):
             input_dim = self.input_dim[0]
         else:
             input_dim = self.input_dim
+
+        self.input_dim = input_dim
         self.output_dim = output_dim if output_dim is not None else input_dim
         self.action_dim = action_dim
         
@@ -253,8 +255,8 @@ class AutoencoderModel(nn.Module):
         
         if self.encoder_type == "lstm":
             # 准备初始隐状态
-            h0 = torch.zeros(2, batch_size, self.input_dim).to(device)
-            c0 = torch.zeros(2, batch_size, self.input_dim).to(device)
+            h0 = torch.zeros((2, batch_size, self.input_dim)).to(device)
+            c0 = torch.zeros((2, batch_size, self.input_dim)).to(device)
             
             # 重复隐空间表示以创建输入序列
             z_seq = z.unsqueeze(1).repeat(1, seq_len, 1)

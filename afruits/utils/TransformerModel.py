@@ -161,6 +161,7 @@ class TransformerModel(nn.Module):
             input_dim = input_dim[0]
         self.input_dim = input_dim
         self.output_dim = output_dim
+        self.action_dim = output_dim
         
         # 检测输入是否为图像
         if isinstance(input_dim, tuple) and len(input_dim) == 3:  # (C, H, W)
