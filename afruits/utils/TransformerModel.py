@@ -141,7 +141,8 @@ class TransformerModel(nn.Module):
         # 这里可以实现数据加载逻辑，返回DataLoader
         # 由于这是一个模型类，实际上数据加载可能在外部完成
         data = self.dataloader_util.load_expert_data(raw_data, batch_size)
-        return data
+        data_loader = data['dataloader']
+        return data_loader
     
     def build_model(self, input_dim, output_dim):
         """

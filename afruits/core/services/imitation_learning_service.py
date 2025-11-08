@@ -168,6 +168,7 @@ class ImitationLearningService:
         data_loader = model.load_sequences(data, batch_size=batch_size)
         
         # 训练模型
+        model.to(self.device)
         training_history = model.train_model(data_loader, epochs=epochs, learning_rate=learning_rate)
         
         # 提取训练指标
@@ -213,6 +214,7 @@ class ImitationLearningService:
         data_loader = model.load_sequences(data, batch_size=batch_size)
         
         # 训练模型
+        model.to(self.device)
         training_history = model.train_model(data_loader, epochs=epochs, learning_rate=learning_rate)
         
         # 提取训练指标

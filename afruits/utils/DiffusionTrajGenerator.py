@@ -102,7 +102,8 @@ class DiffusionTrajGenerator:
             数据加载器 (DataLoader)
         """
         data = self.dataloader_util.load_expert_data(data, batch_size)
-        return data
+        data_loader = data['dataloader']
+        return data_loader
     
     def build_network(self, state_dim, cond_dim: int = 0) -> nn.Module:
         """
