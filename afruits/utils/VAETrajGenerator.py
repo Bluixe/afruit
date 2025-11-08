@@ -186,8 +186,7 @@ class VAETrajGenerator:
                     # x_state shape: [batch_size, seq_len, state_dim] 或 [batch_size, seq_len, im_embd]
                     # x_action shape: [batch_size, seq_len, action_dim]
                     # one-hot 化 x_action 如果是离散动作
-                    if self.discrete_action:
-                        x_action = F.one_hot(x_action.long(), num_classes=self.action_dim).float()
+                    x_action = F.one_hot(x_action.long(), num_classes=self.action_dim).float()
                     x = torch.cat([x_state, x_action], dim=2)
                 else:
                     # 单一输入

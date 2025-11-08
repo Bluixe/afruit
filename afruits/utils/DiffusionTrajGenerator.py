@@ -168,7 +168,11 @@ class DiffusionTrajGenerator:
                 self.act = nn.SiLU()
                 
             def forward(self, x_state=None, t=None, cond=None):
-                x = x_state[:, -1, :]
+                # 处理输入
+                if len(x_state.shape) == 3:  # [batch_size, seq_len, feature_dim]
+                    x = x_state[:, -1, :]  # 取最后一个时间步
+                else:  # [batch_size, feature_dim]
+                    x = x_state
                 
                 # 时间嵌入
                 t_emb = self.time_embed(t.unsqueeze(-1))
@@ -192,7 +196,11 @@ class DiffusionTrajGenerator:
                 
                 # 解码器前向传播
                 for i, layer in enumerate(self.decoder):
-                    h = torch.cat([h, skip_connections[-(i+1)]], dim=-1)
+                    # 确保跳跃连接的维度正确
+                    skip = skip_connections[-(i+1)]
+                    # 连接特征
+                    h = torch.cat([h, skip], dim=-1)
+                    # 应用线性层
                     h = self.act(layer(h)) if i < len(self.decoder) - 1 else layer(h)
                 
                 return h
@@ -260,6 +268,12 @@ class DiffusionTrajGenerator:
                 # 预测噪声
                 predicted_noise = self.model(x_state=noisy_trajectories, t=t / self.diffusion_steps)
                 
+                # 确保预测噪声的形状与原始噪声匹配
+                if predicted_noise.shape != noise.shape:
+                    # 如果是最后一个时间步的预测，则需要扩展到整个序列
+                    if len(predicted_noise.shape) == 2 and len(noise.shape) == 3:
+                        predicted_noise = predicted_noise.unsqueeze(1).expand(-1, noise.shape[1], -1)
+                
                 # 计算损失
                 loss = self.loss_fn(predicted_noise, noise)
                 
@@ -316,7 +330,13 @@ class DiffusionTrajGenerator:
             # 无梯度计算
             with torch.no_grad():
                 # 预测噪声
-                predicted_noise = self.model(x_state=x, t=t, cond=cond_data)
+                # 确保输入形状正确
+                if len(x.shape) == 2:  # [batch_size, feature_dim]
+                    x_input = x.unsqueeze(1)  # 添加序列维度 [batch_size, 1, feature_dim]
+                else:
+                    x_input = x
+                
+                predicted_noise = self.model(x_state=x_input, t=t, cond=cond_data)
                 
                 # 计算去噪步骤
                 alpha = self.alphas[i]
