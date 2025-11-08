@@ -6,6 +6,7 @@ from torch.utils.data import DataLoader, TensorDataset
 from typing import Dict, List, Tuple, Union, Optional, Any
 import os
 import time
+from afruits.utils.DataLoader import DataLoaderUtil
 
 class BehaviorCloner:
     """
@@ -45,6 +46,8 @@ class BehaviorCloner:
         
         # 初始化训练状态
         self.is_trained = False
+
+        self.dataloader_util = DataLoaderUtil()
         
         # 验证参数
         self._validate_params()

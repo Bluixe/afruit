@@ -422,6 +422,7 @@ class VAETrajGenerator:
                     
                     # 计算重构损失
                     # 状态仍使用MSE或MAE
+                    print(reconstructed_states.shape, states.shape)
                     if self.recon_loss_type == "mse":
                         state_recon_loss = F.mse_loss(reconstructed_states, states[:, -1, :])
                     else:  # mae
