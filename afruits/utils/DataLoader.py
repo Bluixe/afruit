@@ -65,7 +65,7 @@ class DataLoaderUtil:
         print(f"数据预处理完成: expert_states shape: {expert_states.shape}, expert_actions shape: {expert_actions.shape}")
         return expert_states, expert_actions
     
-    def load_expert_data(self, data: List|Dict, seq_length: int, batch_size: int = 32) -> Dict:
+    def load_expert_data(self, data: List|Dict, seq_length: int = -1, batch_size: int = 32) -> Dict:
         """
         数据加载
         
@@ -76,6 +76,8 @@ class DataLoaderUtil:
         返回值:
             数据加载器 (DataLoader)
         """
+        if seq_length <= 0:
+            seq_length = 10000
         if type(data) == list:
             # list of dict {"states":..., "actions":...}
             # 将多个轨迹合并为一个整体
@@ -97,9 +99,9 @@ class DataLoaderUtil:
         if states.shape[1] != actions.shape[1]:
             raise ValueError(f"状态序列长度 {states.shape[1]} 与动作序列长度 {actions.shape[1]} 不匹配")
         
-        # 检查序列长度
-        if states.shape[1] < seq_length:
-            raise ValueError(f"轨迹序列长度 {states.shape[1]} 小于设定的序列长度 {seq_length}")
+        # # 检查序列长度
+        # if states.shape[1] < seq_length:
+        #     raise ValueError(f"轨迹序列长度 {states.shape[1]} 小于设定的序列长度 {seq_length}")
         
         # 如果轨迹长度大于设定长度，对于每条数据，随机截取指定长度的片段
         if states.shape[1] > seq_length:

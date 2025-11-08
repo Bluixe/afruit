@@ -82,7 +82,7 @@ class AutoencoderModel(nn.Module):
         返回:
             DataLoader: 数据加载器
         """
-        data = self.dataloader_util.load_expert_data(raw_data, batch_size)
+        data = self.dataloader_util.load_expert_data(raw_data, batch_size=batch_size)
         data_loader = data['dataloader']
         
         return data_loader

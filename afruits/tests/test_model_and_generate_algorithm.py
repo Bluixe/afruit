@@ -31,7 +31,7 @@ class TestModelAndGenerateAlgorithm(unittest.TestCase):
         # 创建长序列轨迹(batch_size, seq_length, state_dim)
         
         # 创建10条轨迹
-        for i in range(10):
+        for i in range(200):
             # 每条轨迹包含40个时间步
             states = np.random.rand(80, 10)  # 10维状态空间
             # 离散动作空间，动作维度为5
@@ -54,7 +54,7 @@ class TestModelAndGenerateAlgorithm(unittest.TestCase):
         test_trajectories = []
         
         # 创建5条测试轨迹
-        for i in range(5):
+        for i in range(60):
             # 每条轨迹包含40个时间步
             states = np.random.rand(80, 10)  # 10维状态空间
             # 离散动作空间，动作维度为5

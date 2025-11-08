@@ -101,7 +101,7 @@ class DiffusionTrajGenerator:
         返回值:
             数据加载器 (DataLoader)
         """
-        data = self.dataloader_util.load_expert_data(data, batch_size)
+        data = self.dataloader_util.load_expert_data(data, batch_size=batch_size)
         data_loader = data['dataloader']
         return data_loader
     
