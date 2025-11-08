@@ -7,6 +7,7 @@ from typing import Dict, List, Tuple, Union, Optional, Any
 import os
 import time
 import copy
+from afruits.utils.DataLoader import DataLoaderUtil
 
 class AdversarialImitationLearner:
     """
@@ -54,6 +55,8 @@ class AdversarialImitationLearner:
         
         # 初始化训练状态
         self.is_trained = False
+
+        self.dataloader_util = DataLoaderUtil()
         
         # 验证参数
         self._validate_params()
@@ -92,46 +95,7 @@ class AdversarialImitationLearner:
             2. 标准化特征
             3. 构建数据集用于训练判别器
         """
-        # 初始化结果
-        expert_states = []
-        expert_actions = []
-        
-        # 检查输入数据
-        if not expert_trajectories or not isinstance(expert_trajectories, dict):
-            raise ValueError("expert_trajectories必须是非空字典")
-        
-        # 处理轨迹数据
-        for traj_id, trajectory in expert_trajectories.items():
-            # 检查轨迹数据是否包含状态和动作
-            if 'states' not in trajectory or 'actions' not in trajectory:
-                print(f"警告: 轨迹 {traj_id} 缺少状态或动作数据，已跳过")
-                continue
-            
-            states = trajectory['states']
-            actions = trajectory['actions']
-            
-            # 检查状态和动作数据长度是否匹配
-            if len(states) != len(actions):
-                print(f"警告: 轨迹 {traj_id} 的状态和动作数据长度不匹配，已跳过")
-                continue
-            
-            # 添加数据
-            expert_states.extend(states)
-            expert_actions.extend(actions)
-        
-        # 转换为numpy数组
-        if expert_states and expert_actions:
-            expert_states = np.array(expert_states)
-            expert_actions = np.array(expert_actions)
-            
-            # 检查动作数据的形状，确保它是离散动作 (batch_size,) 或连续动作 (batch_size, action_dim)
-            if len(expert_actions.shape) > 2:
-                raise ValueError(f"动作数据维度过高: {expert_actions.shape}，应为 (batch_size,) 或 (batch_size, action_dim)")
-        else:
-            raise ValueError("处理后的数据为空，请检查输入数据")
-        
-        print(f"数据预处理完成: expert_states shape: {expert_states.shape}, expert_actions shape: {expert_actions.shape}")
-        print(f"动作类型: {'离散动作' if len(expert_actions.shape) == 1 else '连续动作'}")
+        expert_states, expert_actions = self.dataloader_util.load_bc_gail_data(expert_trajectories)
         return expert_states, expert_actions
     
     def build_models(self, state_dim: int, action_dim: int, generator_args: Dict = None, discriminator_args: Dict = None) -> Tuple[nn.Module, nn.Module]:

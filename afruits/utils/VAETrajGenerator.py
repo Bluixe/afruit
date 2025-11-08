@@ -7,6 +7,7 @@ from typing import Dict, List, Tuple, Union, Optional, Any
 import os
 import time
 import json
+from afruits.utils.DataLoader import DataLoaderUtil
 
 class VAETrajGenerator:
     """
@@ -21,12 +22,15 @@ class VAETrajGenerator:
     ◆ 多模式生成：支持条件/无条件轨迹生成
     """
     
-    def __init__(self, 
-                 latent_dim: int = 64, 
+    def __init__(self,
+                 latent_dim: int = 64,
                  seq_length: int = 120,
                  kl_weight: float = 0.001,
                  recon_loss_type: str = "mse",
-                 physics_constraints: dict = None):
+                 physics_constraints: dict = None,
+                 dropout: float = 0.2,
+                 im_embd: int = 128,
+                 discrete_action: bool = False):
         """
         初始化VAE轨迹生成器
         
@@ -36,12 +40,17 @@ class VAETrajGenerator:
             kl_weight (float): KL散度损失权重，取值范围0.0001-0.1
             recon_loss_type (str): 重构损失类型，可选["mse", "mae"]
             physics_constraints (dict): 物理规则约束字典
+            dropout (float): Dropout比率，用于CNN图像编码器
+            im_embd (int): 图像嵌入维度，用于CNN图像编码器输出
+            discrete_action (bool): 是否使用离散动作，如果为True，则使用交叉熵损失
+                                  并在生成时进行离散化处理
         """
         # 参数有效性检查
         assert 16 <= latent_dim <= 256, "latent_dim必须在16-256范围内"
         assert 60 <= seq_length <= 300, "seq_length必须在60-300范围内"
         assert 0.0001 <= kl_weight <= 0.1, "kl_weight必须在0.0001-0.1范围内"
         assert recon_loss_type in ["mse", "mae"], "recon_loss_type必须是'mse'或'mae'"
+        assert 0.0 <= dropout <= 0.5, "dropout必须在0.0-0.5范围内"
         
         # 初始化参数
         self.latent_dim = latent_dim
@@ -49,6 +58,9 @@ class VAETrajGenerator:
         self.kl_weight = kl_weight
         self.recon_loss_type = recon_loss_type
         self.physics_constraints = physics_constraints if physics_constraints else {}
+        self.dropout = dropout
+        self.im_embd = im_embd
+        self.discrete_action = discrete_action
         
         # 初始化网络模型
         self.encoder = None
@@ -58,74 +70,83 @@ class VAETrajGenerator:
         # 训练相关参数
         self.optimizer = None
         self.scheduler = None
+
+        self.dataloader_util = DataLoaderUtil()
         
-    def load_dataset(self, data_path: str, batch_size: int = 32) -> Dict:
+    def load_dataset(self, data: str, batch_size: int = 32) -> Dict:
         """
         数据加载
         
         参数:
-            data_path (str): 预处理后的数据文件路径
+            data_path (str): 预处理后的数据
             batch_size (int): 批处理大小
             
         返回值:
             数据加载器 (DataLoader)
         """
-        # 加载数据
-        if not os.path.exists(data_path):
-            raise FileNotFoundError(f"数据文件 {data_path} 不存在")
-        
-        # 加载数据（假设为numpy格式）
-        data = np.load(data_path)
-        
-        # 提取轨迹数据
-        trajectories = data['trajectories'] if 'trajectories' in data else data
-        
-        # 检查序列长度
-        if trajectories.shape[1] < self.seq_length:
-            raise ValueError(f"轨迹序列长度 {trajectories.shape[1]} 小于设定的序列长度 {self.seq_length}")
-        
-        # 如果轨迹长度大于设定长度，截取或随机采样
-        if trajectories.shape[1] > self.seq_length:
-            # 随机截取指定长度的片段
-            start_indices = np.random.randint(0, trajectories.shape[1] - self.seq_length, size=trajectories.shape[0])
-            sampled_trajectories = np.array([
-                trajectories[i, start_idx:start_idx+self.seq_length] 
-                for i, start_idx in enumerate(start_indices)
-            ])
-            trajectories = sampled_trajectories
-        
-        # 转换为PyTorch张量
-        trajectories_tensor = torch.FloatTensor(trajectories)
-        
-        # 创建数据集和数据加载器
-        dataset = TensorDataset(trajectories_tensor)
-        dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
-        
-        print(f"数据加载完成: 样本数={len(dataset)}, 输入形状={trajectories.shape}")
-        
-        return {
-            'dataloader': dataloader,
-            'data_shape': trajectories.shape,
-            'feature_dim': trajectories.shape[2] if len(trajectories.shape) > 2 else 1
-        }
+        data = self.dataloader_util.load_expert_data(data, batch_size)
+        return data
     
-    def build_model(self, input_dim: int) -> Tuple[nn.Module, nn.Module]:
+    def build_model(self, input_dim: Union[int, Dict]) -> Tuple[nn.Module, nn.Module]:
         """
         模型构建
         
         参数:
-            input_dim (int): 输入特征维度
+            input_dim (int or Dict): 输入特征维度，可以是整数或包含状态和动作维度的字典
             
         返回值:
             模型组 (tuple): (encoder, decoder)
         """
+        # 处理输入维度
+        has_separate_action = False
+        state_dim = None
+        action_dim = None
+        is_image_state = False
+        image_shape = None
+        
+        # 新格式：分别包含状态和动作维度
+        has_separate_action = True
+        state_dim = input_dim['state_dim']
+        action_dim = input_dim['action_dim']
+        total_dim = input_dim['total_dim']
+        
+        # 检查状态是否为图像（四维张量）
+        if isinstance(state_dim, tuple) and len(state_dim) == 3:
+            is_image_state = True
+            image_shape = state_dim  # (c, h, w)
+            # 对于图像状态，我们将使用CNN编码器，因此这里的state_dim将是CNN的输出维度
+            state_dim = self.im_embd
+            total_dim = state_dim + action_dim
+        
         # 构建编码器
         class Encoder(nn.Module):
-            def __init__(self, input_dim, seq_len, latent_dim):
+            def __init__(self, input_dim, seq_len, latent_dim, has_separate_action=False, state_dim=None, action_dim=None,
+                         is_image_state=False, image_shape=None, dropout=0.2, im_embd=128):
                 super().__init__()
                 self.input_dim = input_dim
                 self.seq_len = seq_len
                 self.latent_dim = latent_dim
+                self.has_separate_action = has_separate_action
+                self.state_dim = state_dim
+                self.action_dim = action_dim
+                self.is_image_state = is_image_state
+                self.image_shape = image_shape
+                self.dropout = dropout
+                self.im_embd = im_embd
+                
+                # 如果状态是图像，添加CNN图像编码器
+                if is_image_state and image_shape is not None:
+                    c, h, w = image_shape
+                    self.image_encoder = nn.Sequential(
+                        nn.Conv2d(c, 16, kernel_size=3, padding=1),
+                        nn.ReLU(),
+                        nn.Conv2d(16, 16, kernel_size=3, padding=1),
+                        nn.ReLU(),
+                        nn.Dropout(self.dropout),
+                        nn.Flatten(start_dim=1),
+                        nn.Linear(int(16 * h * w), self.im_embd),
+                        nn.ReLU(),
+                    )
                 
                 # LSTM编码器
                 self.lstm = nn.LSTM(
@@ -147,7 +168,27 @@ class VAETrajGenerator:
                     nn.SiLU()
                 )
                 
-            def forward(self, x):
+            def forward(self, x_state, x_action=None):
+                # 处理输入
+                if self.is_image_state:
+                    # 如果状态是图像，首先通过CNN编码器处理每个时间步的图像
+                    batch_size, seq_len = x_state.shape[0], x_state.shape[1]
+                    # 重塑为 [batch_size * seq_len, c, h, w]
+                    x_state_reshaped = x_state.view(-1, *self.image_shape)
+                    # 通过CNN编码器
+                    x_state_encoded = self.image_encoder(x_state_reshaped)
+                    # 重塑回 [batch_size, seq_len, im_embd]
+                    x_state = x_state_encoded.view(batch_size, seq_len, -1)
+                
+                if self.has_separate_action and x_action is not None:
+                    # 合并状态和动作
+                    # x_state shape: [batch_size, seq_len, state_dim] 或 [batch_size, seq_len, im_embd]
+                    # x_action shape: [batch_size, seq_len, action_dim]
+                    x = torch.cat([x_state, x_action], dim=2)
+                else:
+                    # 单一输入
+                    x = x_state
+                
                 # x shape: [batch_size, seq_len, input_dim]
                 batch_size = x.size(0)
                 
@@ -168,11 +209,17 @@ class VAETrajGenerator:
         
         # 构建解码器
         class Decoder(nn.Module):
-            def __init__(self, latent_dim, seq_len, output_dim):
+            def __init__(self, latent_dim, seq_len, output_dim, has_separate_action=False, state_dim=None, action_dim=None, is_image_state=False, image_shape=None, im_embd=128):
                 super().__init__()
                 self.latent_dim = latent_dim
                 self.seq_len = seq_len
                 self.output_dim = output_dim
+                self.has_separate_action = has_separate_action
+                self.state_dim = state_dim
+                self.action_dim = action_dim
+                self.is_image_state = is_image_state
+                self.image_shape = image_shape
+                self.im_embd = im_embd
                 
                 # 潜在向量到初始隐藏状态的映射
                 self.fc_hidden = nn.Sequential(
@@ -191,7 +238,31 @@ class VAETrajGenerator:
                 )
                 
                 # 输出层
-                self.fc_out = nn.Linear(128, output_dim)
+                if has_separate_action:
+                    # 分别输出状态和动作
+                    if is_image_state and image_shape is not None:
+                        # 对于图像状态，先输出到im_embd维度
+                        self.fc_state = nn.Linear(128, im_embd)
+                        
+                        # 添加图像解码器
+                        c, h, w = image_shape
+                        self.image_decoder = nn.Sequential(
+                            nn.Linear(im_embd, 16 * h * w),
+                            nn.ReLU(),
+                            nn.Unflatten(1, (16, h, w)),
+                            nn.ConvTranspose2d(16, 16, kernel_size=3, padding=1),
+                            nn.ReLU(),
+                            nn.ConvTranspose2d(16, c, kernel_size=3, padding=1),
+                        )
+                    else:
+                        # 普通状态
+                        self.fc_state = nn.Linear(128, state_dim)
+                    
+                    # 对于离散动作，输出logits
+                    self.fc_action = nn.Linear(128, action_dim)  # 输出每个动作类别的logits
+                else:
+                    # 单一输出
+                    self.fc_out = nn.Linear(128, output_dim)
                 
             def forward(self, z):
                 # z shape: [batch_size, latent_dim]
@@ -209,13 +280,57 @@ class VAETrajGenerator:
                 lstm_out, _ = self.lstm(z_repeated, (h_0, c_0))
                 
                 # 生成轨迹输出
-                output = self.fc_out(lstm_out)
-                
-                return output
+                if self.has_separate_action:
+                    # 分别输出状态和动作
+                    if self.is_image_state and self.image_shape is not None:
+                        # 对于图像状态，先输出到im_embd维度
+                        state_embd = self.fc_state(lstm_out)  # [batch_size, seq_len, im_embd]
+                        
+                        # 重塑为 [batch_size * seq_len, im_embd]
+                        state_embd_flat = state_embd.reshape(-1, self.im_embd)
+                        
+                        # 通过图像解码器
+                        image_flat = self.image_decoder(state_embd_flat)  # [batch_size * seq_len, c, h, w]
+                        
+                        # 重塑回 [batch_size, seq_len, c, h, w]
+                        c, h, w = self.image_shape
+                        state_output = image_flat.reshape(batch_size, self.seq_len, c, h, w)
+                    else:
+                        # 普通状态
+                        state_output = self.fc_state(lstm_out)
+                    
+                    action_output = self.fc_action(lstm_out)
+                    return state_output, action_output
+                else:
+                    # 单一输出
+                    output = self.fc_out(lstm_out)
+                    return output
         
         # 创建编码器和解码器
-        encoder = Encoder(input_dim, self.seq_length, self.latent_dim).to(self.device)
-        decoder = Decoder(self.latent_dim, self.seq_length, input_dim).to(self.device)
+        encoder = Encoder(
+            total_dim,
+            self.seq_length,
+            self.latent_dim,
+            has_separate_action,
+            state_dim,
+            action_dim,
+            is_image_state,
+            image_shape,
+            self.dropout,
+            self.im_embd
+        ).to(self.device)
+        
+        decoder = Decoder(
+            self.latent_dim,
+            self.seq_length,
+            total_dim if not has_separate_action else None,
+            has_separate_action,
+            state_dim,
+            action_dim,
+            is_image_state,
+            image_shape,
+            self.im_embd
+        ).to(self.device)
         
         # 设置优化器
         params = list(encoder.parameters()) + list(decoder.parameters())
@@ -226,6 +341,13 @@ class VAETrajGenerator:
         
         self.encoder = encoder
         self.decoder = decoder
+        
+        # 保存模型配置
+        self.has_separate_action = has_separate_action
+        self.state_dim = state_dim
+        self.action_dim = action_dim
+        self.is_image_state = is_image_state
+        self.image_shape = image_shape
         
         return encoder, decoder
     
@@ -281,19 +403,62 @@ class VAETrajGenerator:
             
             for batch in dataloader:
                 # 获取轨迹数据
-                trajectories = batch[0].to(self.device)
-                batch_size = trajectories.shape[0]
-                
-                # 前向传播
-                mu, logvar = self.encoder(trajectories)
-                z = self.reparameterize(mu, logvar)
-                reconstructed = self.decoder(z)
-                
-                # 计算重构损失
-                if self.recon_loss_type == "mse":
-                    recon_loss = F.mse_loss(reconstructed, trajectories)
-                else:  # mae
-                    recon_loss = F.l1_loss(reconstructed, trajectories)
+                if len(batch) == 2 and self.has_separate_action:
+                    # 分别获取状态和动作数据
+                    states = batch[0].to(self.device)
+                    actions = batch[1].to(self.device)
+                    batch_size = states.shape[0]
+                    
+                    # 检查状态是否为图像格式
+                    if self.is_image_state and len(states.shape) == 5:  # [batch_size, seq_len, c, h, w]
+                        # 前向传播
+                        mu, logvar = self.encoder(states, actions)
+                    else:
+                        # 前向传播
+                        mu, logvar = self.encoder(states, actions)
+                    z = self.reparameterize(mu, logvar)
+                    reconstructed_states, reconstructed_actions = self.decoder(z)
+                    
+                    # 计算重构损失
+                    # 状态仍使用MSE或MAE
+                    if self.recon_loss_type == "mse":
+                        state_recon_loss = F.mse_loss(reconstructed_states, states)
+                    else:  # mae
+                        state_recon_loss = F.l1_loss(reconstructed_states, states)
+                    
+                    # 根据动作类型选择损失函数
+                    if self.discrete_action:
+                        # 对于离散动作，使用交叉熵损失
+                        # 重塑为 [batch*seq, action_dim] 和 [batch*seq]
+                        batch_size, seq_len = actions.shape[0], actions.shape[1]
+                        action_recon_loss = F.cross_entropy(
+                            reconstructed_actions.reshape(-1, self.action_dim),  # [batch*seq, action_dim]
+                            actions.reshape(-1).long()  # [batch*seq]
+                        )
+                    else:
+                        # 对于连续动作，使用MSE或MAE
+                        if self.recon_loss_type == "mse":
+                            action_recon_loss = F.mse_loss(reconstructed_actions, actions)
+                        else:  # mae
+                            action_recon_loss = F.l1_loss(reconstructed_actions, actions)
+                    
+                    # 总重构损失（可以根据需要调整状态和动作的权重）
+                    recon_loss = state_recon_loss + action_recon_loss
+                else:
+                    # 旧格式：单一轨迹数据
+                    trajectories = batch[0].to(self.device)
+                    batch_size = trajectories.shape[0]
+                    
+                    # 前向传播
+                    mu, logvar = self.encoder(trajectories)
+                    z = self.reparameterize(mu, logvar)
+                    reconstructed = self.decoder(z)
+                    
+                    # 计算重构损失
+                    if self.recon_loss_type == "mse":
+                        recon_loss = F.mse_loss(reconstructed, trajectories)
+                    else:  # mae
+                        recon_loss = F.l1_loss(reconstructed, trajectories)
                 
                 # 计算KL散度
                 kl_loss = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
@@ -336,17 +501,23 @@ class VAETrajGenerator:
         
         return history
     
-    def generate(self, num_samples: int = 1, cond_vector: torch.Tensor = None) -> Dict:
+    def generate(self, num_samples: int = 1, cond_vector: torch.Tensor = None, temperature: float = 1.0) -> Dict:
         """
         轨迹生成
         
         参数:
             num_samples (int): 生成数量
             cond_vector (torch.Tensor): 条件向量
+            temperature (float): 温度参数，控制采样随机性。较低的值（接近0）使生成更确定性，
+                               较高的值增加随机性。默认为1.0
             
         返回值:
             生成轨迹 (dict):
-                trajectories: 状态-动作序列
+                state: 状态序列（如果是图像状态，则为[batch_size, seq_len, c, h, w]格式）
+                action: 离散动作序列（整数索引）
+                action_probs: 动作概率分布
+                action_logits: 原始logits输出
+                trajectories: 状态-动作序列（仅在旧格式模式下返回）
                 latent_codes: 潜在空间编码
         """
         if self.encoder is None or self.decoder is None:
@@ -366,66 +537,55 @@ class VAETrajGenerator:
                 z = torch.randn(num_samples, self.latent_dim).to(self.device)
             
             # 解码生成轨迹
-            generated_trajectories = self.decoder(z)
-        
-        return {
-            'trajectories': generated_trajectories.cpu().numpy(),
-            'latent_codes': z.cpu().numpy()
-        }
-    
-    def validate_physics(self, trajectories: List) -> List:
-        """
-        物理规则校验
-        
-        参数:
-            trajectories (List): 待校验轨迹
-            
-        返回值:
-            合规轨迹集 (List):
-                ◆ 通过空气动力学束的轨迹
-        """
-        if not trajectories:
-            return []
-        
-        valid_trajectories = []
-        
-        # 转换为numpy数组（如果是张量）
-        if isinstance(trajectories, torch.Tensor):
-            trajectories = trajectories.cpu().numpy()
-        
-        # 遍历每条轨迹进行校验
-        for traj in trajectories:
-            # 检查物理约束
-            is_valid = True
-            
-            # 检查速度约束（如果存在）
-            if 'max_velocity' in self.physics_constraints and traj.shape[-1] >= 6:
-                max_vel = self.physics_constraints['max_velocity']
-                # 假设轨迹中包含速度信息在索引3-5
-                velocities = traj[:, 3:6]
-                vel_magnitude = np.linalg.norm(velocities, axis=1)
+            if self.has_separate_action:
+                # 分别生成状态和动作
+                generated_states, generated_actions = self.decoder(z)
                 
-                # 检查是否有速度超过阈值
-                if np.any(vel_magnitude > max_vel):
-                    is_valid = False
-            
-            # 检查加速度约束（如果存在）
-            if 'max_acceleration' in self.physics_constraints and traj.shape[-1] >= 6:
-                max_acc = self.physics_constraints['max_acceleration']
-                # 计算加速度（速度的差分）
-                velocities = traj[:, 3:6]
-                accelerations = np.diff(velocities, axis=0)
-                acc_magnitude = np.linalg.norm(accelerations, axis=1)
+                # 对于图像状态，generated_states已经是[batch_size, seq_len, c, h, w]格式
+                # 由于decoder.forward中的处理，不需要额外的转换
                 
-                # 检查是否有加速度超过阈值
-                if np.any(acc_magnitude > max_acc):
-                    is_valid = False
-            
-            # 如果通过所有约束检查，则添加到有效轨迹集
-            if is_valid:
-                valid_trajectories.append(traj)
-        
-        return valid_trajectories
+                # 根据动作类型选择处理方式
+                if self.discrete_action:
+                    # 对于离散动作，需要进行处理
+                    # 使用温度参数调整logits
+                    scaled_logits = generated_actions / temperature
+                    
+                    # 计算softmax概率
+                    action_probs = F.softmax(scaled_logits, dim=-1)
+                    
+                    # 可以使用两种方式获取离散动作：
+                    # 1. argmax: 取概率最大的类别（确定性）
+                    if temperature <= 0.01:  # 接近于0的温度，使用argmax
+                        discrete_actions = torch.argmax(scaled_logits, dim=-1)
+                    # 2. 按概率采样（随机性）
+                    else:
+                        # 重塑为 [batch*seq, action_dim]，采样后再重塑回 [batch, seq]
+                        probs_flat = action_probs.reshape(-1, self.action_dim)
+                        sampled_flat = torch.multinomial(probs_flat, 1).squeeze(-1)
+                        discrete_actions = sampled_flat.reshape(num_samples, self.seq_length)
+                    
+                    return {
+                        'state': generated_states.cpu().numpy(),
+                        'action': discrete_actions.cpu().numpy(),
+                        'action_probs': action_probs.cpu().numpy(),  # 返回概率分布
+                        'action_logits': scaled_logits.cpu().numpy(),  # 返回原始logits
+                        'latent_codes': z.cpu().numpy()
+                    }
+                else:
+                    # 对于连续动作，直接返回
+                    return {
+                        'state': generated_states.cpu().numpy(),
+                        'action': generated_actions.cpu().numpy(),
+                        'latent_codes': z.cpu().numpy()
+                    }
+            else:
+                # 旧格式：单一轨迹
+                generated_trajectories = self.decoder(z)
+                
+                return {
+                    'trajectories': generated_trajectories.cpu().numpy(),
+                    'latent_codes': z.cpu().numpy()
+                }
     
     def save_model(self, save_path: str) -> None:
         """
@@ -451,7 +611,11 @@ class VAETrajGenerator:
                 'seq_length': self.seq_length,
                 'kl_weight': self.kl_weight,
                 'recon_loss_type': self.recon_loss_type,
-                'physics_constraints': self.physics_constraints
+                'physics_constraints': self.physics_constraints,
+                'dropout': self.dropout,
+                'im_embd': self.im_embd,
+                'is_image_state': self.is_image_state,
+                'image_shape': self.image_shape
             }
         }
         
@@ -490,6 +654,10 @@ class VAETrajGenerator:
         self.kl_weight = config.get('kl_weight', self.kl_weight)
         self.recon_loss_type = config.get('recon_loss_type', self.recon_loss_type)
         self.physics_constraints = config.get('physics_constraints', self.physics_constraints)
+        self.dropout = config.get('dropout', self.dropout)
+        self.im_embd = config.get('im_embd', self.im_embd)
+        self.is_image_state = config.get('is_image_state', False)
+        self.image_shape = config.get('image_shape', None)
         
         # 如果没有提供input_dim，尝试从模型结构推断
         if input_dim is None:
@@ -520,5 +688,7 @@ class VAETrajGenerator:
             
         print(f"模型已从 {load_path} 加载")
         print(f"配置: latent_dim={self.latent_dim}, seq_length={self.seq_length}, kl_weight={self.kl_weight}")
+        if self.is_image_state:
+            print(f"图像状态配置: image_shape={self.image_shape}, dropout={self.dropout}, im_embd={self.im_embd}")
         
         return True

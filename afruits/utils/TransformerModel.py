@@ -6,6 +6,8 @@ import numpy as np
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
+from afruits.utils.DataLoader import DataLoaderUtil
+
 class TransformerModel(nn.Module):
     """
     通用的Transformer模型类，基于注意力机制的序列处理模型。
@@ -15,40 +17,45 @@ class TransformerModel(nn.Module):
     - 信息瓶颈设计，通过正则化和注意力机制
     - 多任务支持，支持多种预测和训练任务
     - 位置编码，支持序列位置信息的编码
+    - 支持处理state和action数据，可处理图像输入
     """
     
-    def __init__(self, 
-                 encoder_type="str",  # 编码器类型: "str"或"transformer"
+    def __init__(self,
                  input_dim=32,        # 输入特征维度
+                 action_dim=6,        # 动作维度
                  d_model=128,         # 模型隐藏层维度
                  num_heads=4,         # 注意力头数量
                  num_layers=3,        # Transformer层数
                  max_seq_len=100,     # 最大序列长度
                  dropout_rate=0.2,    # Dropout比率
-                 lr_weight=0.01):     # 信息瓶颈权重
+                 lr_weight=0.01,      # 信息瓶颈权重
+                 device=None):        # 设备
         """
         初始化TransformerModel
         
         参数:
-            encoder_type (str): 编码器类型，可选"str"或"transformer"
             input_dim (int): 输入特征维度
+            action_dim (int): 动作维度
             d_model (int): 模型隐藏层维度
             num_heads (int): 注意力头数量
             num_layers (int): Transformer层数
             max_seq_len (int): 最大序列长度
             dropout_rate (float): Dropout比率
             lr_weight (float): 信息瓶颈权重
+            device: 计算设备
         """
         super(TransformerModel, self).__init__()
         
-        self.encoder_type = encoder_type
         self.input_dim = input_dim
+        self.action_dim = action_dim
         self.d_model = d_model
         self.num_heads = num_heads
         self.num_layers = num_layers
         self.max_seq_len = max_seq_len
         self.dropout_rate = dropout_rate
         self.lr_weight = lr_weight
+        self.device = device if device is not None else torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        self.im_embd = 64  # 图像嵌入维度
         
         # 创建GPT2配置
         self.config = GPT2Config(
@@ -65,32 +72,62 @@ class TransformerModel(nn.Module):
         # 初始化Transformer模型
         self.transformer = GPT2Model(self.config)
         
-        # 输入嵌入层
-        self.input_embedding = nn.Linear(self.input_dim, self.d_model)
-        
         # 层归一化
-        self.layer_norm = nn.LayerNorm(self.d_model)
+        self.embed_ln = nn.LayerNorm(self.d_model)
         
-        # 位置编码
-        self.position_embedding = nn.Parameter(
-            torch.zeros(1, self.max_seq_len, self.d_model)
-        )
+        # 输出层 - 预测动作
+        self.pred_actions = nn.Linear(self.d_model, self.action_dim)
         
-        # 初始化位置编码
-        self._init_position_embedding()
+        # 数据加载器
+        self.dataloader_util = DataLoaderUtil()
+        
+        # 是否使用图像编码器（将在forward中根据输入维度决定）
+        self.use_image_encoder = False
     
-    def _init_position_embedding(self):
-        """初始化位置编码"""
-        position = torch.arange(0, self.max_seq_len).unsqueeze(1)
-        div_term = torch.exp(
-            torch.arange(0, self.d_model, 2) * -(np.log(10000.0) / self.d_model)
+    def _init_image_encoder(self, h, w, c):
+        """
+        初始化图像编码器
+        
+        参数:
+            h (int): 图像高度
+            w (int): 图像宽度
+            c (int): 图像通道数
+        """
+        self.use_image_encoder = True
+        
+        # 图像编码器
+        self.image_encoder = nn.Sequential(
+            nn.Conv2d(c, 16, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.Conv2d(16, 16, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.Dropout(self.dropout_rate),
+            nn.Flatten(start_dim=1),
+            nn.Linear(int(16 * h * w), self.im_embd),
+            nn.ReLU(),
         )
         
-        pe = torch.zeros(self.max_seq_len, self.d_model)
-        pe[:, 0::2] = torch.sin(position * div_term)
-        pe[:, 1::2] = torch.cos(position * div_term)
+        # 图像解码器
+        self.image_decoder = nn.Sequential(
+            nn.Linear(self.im_embd, 16 * h * w),
+            nn.ReLU(),
+            nn.Unflatten(1, (16, h, w)),
+            nn.ConvTranspose2d(16, 16, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.ConvTranspose2d(16, c, kernel_size=3, padding=1),
+        )
         
-        self.position_embedding.data = pe.unsqueeze(0)
+        # 更新嵌入层
+        new_dim = self.im_embd + self.action_dim + 1  # 图像编码 + one-hot动作 + 奖励
+        self.embed_transition = nn.Linear(new_dim, self.d_model)
+    
+    def _init_vector_encoder(self):
+        """初始化向量编码器"""
+        self.use_image_encoder = False
+        
+        # 更新嵌入层
+        new_dim = self.input_dim + self.action_dim + 1  # 状态向量 + one-hot动作 + 奖励
+        self.embed_transition = nn.Linear(new_dim, self.d_model)
     
     def load_sequences(self, raw_data, batch_size=32):
         """
@@ -105,7 +142,8 @@ class TransformerModel(nn.Module):
         """
         # 这里可以实现数据加载逻辑，返回DataLoader
         # 由于这是一个模型类，实际上数据加载可能在外部完成
-        pass
+        data = self.dataloader_util.load_expert_data(raw_data, batch_size)
+        return data
     
     def build_model(self, input_dim, output_dim, encoder_type="str", decoder_type="fc"):
         """
@@ -123,8 +161,18 @@ class TransformerModel(nn.Module):
         self.input_dim = input_dim
         self.output_dim = output_dim
         
+        # 检测输入是否为图像
+        if isinstance(input_dim, tuple) and len(input_dim) == 3:  # (C, H, W)
+            # 图像输入
+            c, h, w = input_dim
+            self._init_image_encoder(h, w, c)
+        elif isinstance(input_dim, int) and input_dim > 0:
+            # 向量输入
+            self._init_vector_encoder()
+        
         # 更新输入嵌入层
-        self.input_embedding = nn.Linear(self.input_dim, self.d_model)
+        if not self.use_image_encoder:
+            self.input_embedding = nn.Linear(self.input_dim, self.d_model)
         
         # 输出层
         if decoder_type == "fc":
@@ -135,60 +183,87 @@ class TransformerModel(nn.Module):
         
         return self
     
-    def forward(self, x, attention_mask=None, output_attentions=False):
+    def forward(self, batch, output_attentions=False):
         """
         前向传播
         
         参数:
-            x (torch.Tensor): 输入张量 [batch_size, seq_len, input_dim]
-            attention_mask (torch.Tensor, optional): 注意力掩码
+            batch: 包含states和actions的批次数据
             output_attentions (bool): 是否输出注意力权重
             
         返回:
-            torch.Tensor: 输出张量 [batch_size, seq_len, output_dim]
+            torch.Tensor: 预测的动作概率
         """
-        batch_size, seq_len = x.shape[0], x.shape[1]
+        # 从batch中获取数据
+        states = batch[0].to(self.device)
+        actions = batch[1].to(self.device)
         
-        # 确保序列长度不超过最大长度
-        if seq_len > self.max_seq_len:
-            x = x[:, :self.max_seq_len, :]
-            seq_len = self.max_seq_len
-            if attention_mask is not None:
-                attention_mask = attention_mask[:, :self.max_seq_len]
+        # 确保action是long类型并转换为one-hot编码
+        if len(actions.shape) == 1:  # [batch_size]
+            actions = actions.unsqueeze(1)  # [batch_size, 1]
         
-        # 输入嵌入
-        x = self.input_embedding(x)
+        if len(actions.shape) == 2:  # [batch_size, seq_len]
+            actions = actions.long()
+        else:  # [batch_size, seq_len, 1]
+            actions = actions.squeeze(-1).long()
         
-        # 添加位置编码
-        x = x + self.position_embedding[:, :seq_len, :]
+        # 转换为one-hot编码
+        actions_one_hot = torch.nn.functional.one_hot(
+            actions, num_classes=self.action_dim).float()
         
-        # 层归一化
-        x = self.layer_norm(x)
+        # 创建奖励占位符（在这个模型中我们不使用奖励，但保持接口一致）
+        rewards = torch.zeros(actions.shape[0], actions.shape[1], 1).to(self.device)
+        
+        # 处理状态
+        if self.use_image_encoder:
+            # 处理图像状态
+            batch_size = states.shape[0]
+            
+            # 重塑图像序列以便通过编码器处理
+            if len(states.shape) == 5:  # [batch_size, seq_len, channels, height, width]
+                seq_len = states.shape[1]
+                states_reshaped = states.view(-1, states.shape[2], states.shape[3], states.shape[4])
+            else:  # [batch_size, channels, height, width]
+                seq_len = 1
+                states_reshaped = states
+            
+            # 编码图像
+            encoded_states = self.image_encoder(states_reshaped)
+            encoded_states = encoded_states.view(batch_size, seq_len, self.im_embd)
+        else:
+            encoded_states = states
+        
+        # 将状态、动作和奖励在特征维度上拼接
+        stacked_inputs = torch.cat([
+            actions_one_hot,
+            rewards,
+            encoded_states,
+        ], dim=2)
+        
+        # 应用线性变换和层归一化
+        stacked_inputs = self.embed_transition(stacked_inputs)
+        stacked_inputs = self.embed_ln(stacked_inputs)
         
         # Transformer前向传播
         transformer_outputs = self.transformer(
-            inputs_embeds=x,
-            attention_mask=attention_mask,
+            inputs_embeds=stacked_inputs,
             output_attentions=output_attentions
         )
         
-        # 获取隐藏状态
-        hidden_states = transformer_outputs.last_hidden_state
-        
-        # 输出层
-        outputs = self.output_layer(hidden_states)
+        # 预测动作
+        preds = self.pred_actions(transformer_outputs.last_hidden_state)
         
         if output_attentions:
-            return outputs, transformer_outputs.attentions
+            return preds, transformer_outputs.attentions
         else:
-            return outputs
+            return preds
     
-    def train(self, data_loader, val_loader=None, epochs=10, learning_rate=0.001):
+    def train_model(self, train_loader, val_loader=None, epochs=10, learning_rate=0.001):
         """
         训练模型
         
         参数:
-            data_loader (DataLoader): 训练数据加载器
+            train_loader (DataLoader): 训练数据加载器
             val_loader (DataLoader, optional): 验证数据加载器
             epochs (int): 训练轮数
             learning_rate (float): 学习率
@@ -199,8 +274,8 @@ class TransformerModel(nn.Module):
         # 优化器
         optimizer = torch.optim.Adam(self.parameters(), lr=learning_rate)
         
-        # 损失函数
-        criterion = nn.MSELoss()
+        # 损失函数 - 交叉熵损失用于分类任务
+        criterion = nn.CrossEntropyLoss()
         
         # 训练历史
         history = {
@@ -214,18 +289,24 @@ class TransformerModel(nn.Module):
             self.train()
             train_loss = 0.0
             
-            for batch in data_loader:
+            for batch in train_loader:
                 # 前向传播
-                inputs = batch['inputs'].to(device)
-                targets = batch['targets'].to(device)
+                pred_actions = self(batch)
                 
-                outputs = self(inputs)
-                loss = criterion(outputs, targets)
+                # 获取真实动作
+                true_actions = batch[1].to(self.device)
+                
+                # 重塑预测和真实动作以适应损失函数
+                true_actions = true_actions.reshape(-1).long()
+                pred_actions = pred_actions.reshape(-1, self.action_dim)
+                
+                # 计算损失
+                loss = criterion(pred_actions, true_actions)
                 
                 # 添加信息瓶颈正则化
                 if self.lr_weight > 0:
                     # 计算注意力权重的熵作为正则化项
-                    _, attentions = self(inputs, output_attentions=True)
+                    _, attentions = self(batch, output_attentions=True)
                     attention_entropy = 0
                     for attention in attentions:
                         # 计算注意力权重的熵
@@ -243,7 +324,7 @@ class TransformerModel(nn.Module):
                 train_loss += loss.item()
             
             # 计算平均训练损失
-            train_loss /= len(data_loader)
+            train_loss /= len(train_loader)
             history['train_loss'].append(train_loss)
             
             # 验证
@@ -269,7 +350,7 @@ class TransformerModel(nn.Module):
             float: 评估损失
         """
         if criterion is None:
-            criterion = nn.MSELoss()
+            criterion = nn.CrossEntropyLoss()
         
         # 评估模式
         self.eval()
@@ -278,11 +359,17 @@ class TransformerModel(nn.Module):
         with torch.no_grad():
             for batch in data_loader:
                 # 前向传播
-                inputs = batch['inputs'].to(device)
-                targets = batch['targets'].to(device)
+                pred_actions = self(batch)
                 
-                outputs = self(inputs)
-                loss = criterion(outputs, targets)
+                # 获取真实动作
+                true_actions = batch[1].to(self.device)
+                
+                # 重塑预测和真实动作以适应损失函数
+                true_actions = true_actions.reshape(-1).long()
+                pred_actions = pred_actions.reshape(-1, self.action_dim)
+                
+                # 计算损失
+                loss = criterion(pred_actions, true_actions)
                 
                 eval_loss += loss.item()
         
@@ -291,40 +378,49 @@ class TransformerModel(nn.Module):
         
         return eval_loss
     
-    def predict(self, input_seq, pred_steps=1):
+    def predict(self, states):
         """
-        预测
+        预测动作
         
         参数:
-            input_seq (torch.Tensor): 输入序列
-            pred_steps (int): 预测步数
+            states (torch.Tensor): 状态序列
             
         返回:
-            dict: 预测结果
+            torch.Tensor: 预测的动作概率
         """
         # 评估模式
         self.eval()
         
         with torch.no_grad():
-            # 确保输入是张量
-            if not isinstance(input_seq, torch.Tensor):
-                input_seq = torch.tensor(input_seq, dtype=torch.float32).to(device)
+            # 确保输入是张量并移动到正确的设备
+            if not isinstance(states, torch.Tensor):
+                states = torch.tensor(states, dtype=torch.float32).to(self.device)
+            else:
+                states = states.to(self.device)
             
-            # 添加批次维度（如果需要）
-            if len(input_seq.shape) == 2:
-                input_seq = input_seq.unsqueeze(0)
+            # 创建一个虚拟的动作序列（全零）
+            if len(states.shape) == 4:  # 单个图像 [batch_size, channels, height, width]
+                batch_size = states.shape[0]
+                dummy_actions = torch.zeros(batch_size, 1, dtype=torch.long).to(self.device)
+            elif len(states.shape) == 5:  # 图像序列 [batch_size, seq_len, channels, height, width]
+                batch_size, seq_len = states.shape[0], states.shape[1]
+                dummy_actions = torch.zeros(batch_size, seq_len, dtype=torch.long).to(self.device)
+            elif len(states.shape) == 2:  # 单个向量状态 [batch_size, features]
+                batch_size = states.shape[0]
+                dummy_actions = torch.zeros(batch_size, 1, dtype=torch.long).to(self.device)
+            elif len(states.shape) == 3:  # 向量状态序列 [batch_size, seq_len, features]
+                batch_size, seq_len = states.shape[0], states.shape[1]
+                dummy_actions = torch.zeros(batch_size, seq_len, dtype=torch.long).to(self.device)
+            else:
+                raise ValueError(f"不支持的状态形状: {states.shape}")
+            
+            # 创建批次
+            batch = [states, dummy_actions]
             
             # 前向传播
-            outputs = self(input_seq)
+            pred_actions = self(batch)
             
-            # 获取预测结果
-            predictions = outputs[:, -pred_steps:, :]
+            # 获取预测的动作概率
+            action_probs = torch.softmax(pred_actions, dim=-1)
             
-            # 计算注意力权重（如果需要）
-            _, attentions = self(input_seq, output_attentions=True)
-            attention_map = torch.cat([att.mean(dim=1) for att in attentions], dim=0)
-            
-            return {
-                'trajectory': predictions.cpu().numpy(),
-                'attention_map': attention_map.cpu().numpy()
-            }
+            return action_probs

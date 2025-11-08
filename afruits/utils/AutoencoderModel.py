@@ -6,6 +6,10 @@ from torch.utils.data import DataLoader, TensorDataset
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
+
+from afruits.utils.DataLoader import DataLoaderUtil
+import math
+
 class AutoencoderModel(nn.Module):
     """
     通用的自编码器模型类，基于LSTM/Transformer架构实现编码解码功能。
@@ -17,22 +21,23 @@ class AutoencoderModel(nn.Module):
     - 可视化分析：隐空间向量可视化比较
     """
     
-    def __init__(self, 
-                 encoder_type="str",  # 编码器类型: "str"或"transformer"
+    def __init__(self,
+                 encoder_type="lstm",  # 编码器类型: "str"或"transformer"
                  latent_dim=32,       # 隐空间维度
                  seq_length=100,      # 序列长度
                  input_dim=512,       # 输入特征维度
-                 h_weight=0.001,      # 正则化权重
-                 dropout_rate=0.2):   # Dropout比率
+                 kl_weight=0.001,     # 正则化权重
+                 dropout_rate=0.2,    # Dropout比率
+                 action_dim=None):    # 动作空间维度（用于one-hot编码）
         """
         初始化AutoencoderModel
         
         参数:
-            encoder_type (str): 编码器类型，可选"str"或"transformer"
+            encoder_type (str): 编码器类型，可选"lstm"或"transformer"
             latent_dim (int): 隐空间维度
             seq_length (int): 序列长度
             input_dim (int): 输入特征维度
-            h_weight (float): 正则化权重
+            kl_weight (float): 正则化权重
             dropout_rate (float): Dropout比率
         """
         super(AutoencoderModel, self).__init__()
@@ -41,11 +46,13 @@ class AutoencoderModel(nn.Module):
         self.latent_dim = latent_dim
         self.seq_length = seq_length
         self.input_dim = input_dim
-        self.h_weight = h_weight
+        self.kl_weight = kl_weight
         self.dropout_rate = dropout_rate
+        self.action_dim = action_dim
+        self.device = device
         
         # 根据编码器类型初始化不同的编码器
-        if encoder_type == "str":
+        if encoder_type == "lstm":
             # LSTM编码器
             self.encoder = nn.LSTM(
                 input_size=input_dim,
@@ -113,6 +120,18 @@ class AutoencoderModel(nn.Module):
         
         else:
             raise ValueError(f"不支持的编码器类型: {encoder_type}")
+
+        # 图像输入检测和处理
+        self.is_image_input = False
+        self.image_encoder = None
+        self.image_decoder = None
+
+        # 动作处理（one-hot编码）
+        if action_dim is not None:
+            self.action_embedding = nn.Embedding(action_dim, action_dim)
+            self.action_linear = nn.Linear(action_dim, action_dim)
+
+        self.dataloader_util = DataLoaderUtil()
     
     def _init_position_embedding(self):
         """初始化位置编码"""
@@ -135,34 +154,16 @@ class AutoencoderModel(nn.Module):
         参数:
             raw_data (dict): 原始数据
             batch_size (int): 批处理大小
-            mode (str): 数据模式，"train_test"或"train_val_test"
             
         返回:
             DataLoader: 数据加载器
         """
-        # 提取特征和标签
-        features = raw_data.get('features', None)
-        
-        if features is None:
-            raise ValueError("输入数据必须包含'features'键")
-        
-        # 转换为张量
-        if not isinstance(features, torch.Tensor):
-            features = torch.tensor(features, dtype=torch.float32)
-        
-        # 创建数据集
-        dataset = TensorDataset(features, features)  # 自编码器输入输出相同
-        
-        # 创建数据加载器
-        data_loader = DataLoader(
-            dataset,
-            batch_size=batch_size,
-            shuffle=True
-        )
+        data = self.dataloader_util.load_expert_data(raw_data, batch_size)
+        data_loader = data['dataloader']
         
         return data_loader
     
-    def build_model(self, input_dim, output_dim=None):
+    def build_model(self, input_dim, output_dim=None, action_dim=None):
         """
         构建模型
         
@@ -175,6 +176,7 @@ class AutoencoderModel(nn.Module):
         """
         self.input_dim = input_dim
         self.output_dim = output_dim if output_dim is not None else input_dim
+        self.action_dim = action_dim
         
         # 重新初始化模型
         self.__init__(
@@ -182,11 +184,45 @@ class AutoencoderModel(nn.Module):
             latent_dim=self.latent_dim,
             seq_length=self.seq_length,
             input_dim=self.input_dim,
-            h_weight=self.h_weight,
-            dropout_rate=self.dropout_rate
+            kl_weight=self.kl_weight,
+            dropout_rate=self.dropout_rate,
+            action_dim=self.action_dim
         )
         
+        # 检测是否为图像输入并设置图像编码器和解码器
+        self.setup_image_processors()
+        
         return self
+    
+    def setup_image_processors(self):
+        """
+        检测输入是否为图像，并设置相应的图像处理器
+        """
+        # 如果输入维度是三维的 (C, H, W)，则认为是图像输入
+        if isinstance(self.input_dim, tuple) and len(self.input_dim) == 3:
+            self.is_image_input = True
+            c, h, w = self.input_dim
+            im_embd = self.latent_dim
+            
+            # 图像编码器
+            self.image_encoder = nn.Sequential(
+                nn.Conv2d(c, 16, kernel_size=3, padding=1),
+                nn.ReLU(),
+                nn.Conv2d(16, 16, kernel_size=3, padding=1),
+                nn.ReLU(),
+                nn.Flatten(),
+                nn.Linear(16 * h * w, im_embd)
+            )
+            
+            # 图像解码器
+            self.image_decoder = nn.Sequential(
+                nn.Linear(im_embd, 16 * h * w),
+                nn.ReLU(),
+                nn.Unflatten(1, (16, h, w)),
+                nn.ConvTranspose2d(16, 16, kernel_size=3, padding=1),
+                nn.ReLU(),
+                nn.ConvTranspose2d(16, c, kernel_size=3, padding=1),
+            )
     
     def encode(self, x):
         """
@@ -198,7 +234,7 @@ class AutoencoderModel(nn.Module):
         返回:
             torch.Tensor: 隐空间表示 [batch_size, latent_dim]
         """
-        if self.encoder_type == "str":
+        if self.encoder_type == "lstm":
             # LSTM编码
             _, (hidden, _) = self.encoder(x)
             # 合并双向LSTM的隐状态
@@ -232,7 +268,7 @@ class AutoencoderModel(nn.Module):
         
         batch_size = z.size(0)
         
-        if self.encoder_type == "str":
+        if self.encoder_type == "lstm":
             # 准备初始隐状态
             h0 = torch.zeros(2, batch_size, self.input_dim).to(device)
             c0 = torch.zeros(2, batch_size, self.input_dim).to(device)
@@ -264,25 +300,88 @@ class AutoencoderModel(nn.Module):
         
         return output
     
-    def forward(self, x):
+    def one_hot_encode_action(self, action):
+        """
+        将离散动作转换为one-hot编码
+        
+        参数:
+            action (torch.Tensor): 离散动作张量 [batch_size] 或 [batch_size, seq_len]
+            
+        返回:
+            torch.Tensor: one-hot编码后的动作
+        """
+        if self.action_dim is None:
+            raise ValueError("未设置action_dim，无法进行one-hot编码")
+        
+        # 处理不同形状的动作输入
+        if len(action.shape) == 1:  # [batch_size]
+            # 使用Embedding层进行one-hot编码
+            return self.action_embedding(action)
+        elif len(action.shape) == 2:  # [batch_size, seq_len]
+            # 重塑为一维，进行编码，然后恢复形状
+            batch_size, seq_len = action.shape
+            action_flat = action.reshape(-1)
+            action_emb = self.action_embedding(action_flat)
+            return action_emb.reshape(batch_size, seq_len, -1)
+        else:
+            raise ValueError(f"不支持的动作形状: {action.shape}")
+    
+    def process_image_input(self, x):
+        """
+        处理图像输入
+        
+        参数:
+            x (torch.Tensor): 图像输入 [batch_size, C, H, W] 或 [batch_size, seq_len, C, H, W]
+            
+        返回:
+            torch.Tensor: 处理后的特征
+        """
+        if not self.is_image_input:
+            return x
+        
+        # 处理不同形状的图像输入
+        if len(x.shape) == 4:  # [batch_size, C, H, W]
+            return self.image_encoder(x)
+        elif len(x.shape) == 5:  # [batch_size, seq_len, C, H, W]
+            batch_size, seq_len = x.shape[:2]
+            x_flat = x.reshape(-1, *x.shape[2:])
+            x_enc = self.image_encoder(x_flat)
+            return x_enc.reshape(batch_size, seq_len, -1)
+        else:
+            raise ValueError(f"不支持的图像形状: {x.shape}")
+    
+    def forward(self, batch):
         """
         前向传播
         
         参数:
-            x (torch.Tensor): 输入张量 [batch_size, seq_len, input_dim]
+            batch (tuple): 包含状态和动作的批次数据 (states, actions)
             
         返回:
             tuple: (重构输出, 隐空间表示)
         """
-        # 编码
-        z = self.encode(x)
+        # 解包批次数据
+        states = batch[0].to(self.device)
+        actions = batch[1].to(self.device) if len(batch) > 1 else None
         
-        # 解码
-        output = self.decode(z, x.size(1))
+        # 处理图像输入
+        if self.is_image_input:
+            states = self.process_image_input(states)
+        
+        # 编码状态
+        z = self.encode(states)
+        
+        # 解码状态
+        output = self.decode(z, states.size(1))
+        
+        # 如果有动作数据，进行one-hot编码
+        if actions is not None and self.action_dim is not None:
+            actions_encoded = self.one_hot_encode_action(actions)
+            # 这里只返回编码后的动作，不对动作进行自编码重构
         
         return output, z
     
-    def train(self, data_loader, val_loader=None, epochs=10, learning_rate=0.001):
+    def train(self, data_loader, val_loader=None, epochs=10, learning_rate=0.001, process_actions=True):
         """
         训练模型
         
@@ -310,21 +409,22 @@ class AutoencoderModel(nn.Module):
             self.train()
             train_loss = 0.0
             
-            for batch_x, _ in data_loader:
-                # 移动到设备
-                batch_x = batch_x.to(device)
+            for batch in data_loader:
+                # 解包批次数据
+                states = batch[0].to(self.device)
+                actions = batch[1].to(self.device) if len(batch) > 1 and process_actions else None
                 
                 # 前向传播
-                output, z = self(batch_x)
+                output, z = self((states, actions) if actions is not None else (states,))
                 
-                # 计算重构损失
-                recon_loss = F.mse_loss(output, batch_x)
+                # 计算重构损失 (只针对状态进行重构)
+                recon_loss = F.mse_loss(output, states)
                 
                 # 计算正则化损失（KL散度或其他）
-                if self.h_weight > 0:
+                if self.kl_weight > 0:
                     # 简单的L2正则化
                     reg_loss = torch.mean(z ** 2)
-                    loss = recon_loss + self.h_weight * reg_loss
+                    loss = recon_loss + self.kl_weight * reg_loss
                 else:
                     loss = recon_loss
                 
@@ -365,20 +465,21 @@ class AutoencoderModel(nn.Module):
         eval_loss = 0.0
         
         with torch.no_grad():
-            for batch_x, _ in data_loader:
-                # 移动到设备
-                batch_x = batch_x.to(device)
+            for batch in data_loader:
+                # 解包批次数据
+                states = batch[0].to(self.device)
+                actions = batch[1].to(self.device) if len(batch) > 1 else None
                 
                 # 前向传播
-                output, z = self(batch_x)
+                output, z = self((states, actions) if actions is not None else (states,))
                 
-                # 计算重构损失
-                recon_loss = F.mse_loss(output, batch_x)
+                # 计算重构损失 (只针对状态进行重构)
+                recon_loss = F.mse_loss(output, states)
                 
                 # 计算正则化损失
-                if self.h_weight > 0:
+                if self.kl_weight > 0:
                     reg_loss = torch.mean(z ** 2)
-                    loss = recon_loss + self.h_weight * reg_loss
+                    loss = recon_loss + self.kl_weight * reg_loss
                 else:
                     loss = recon_loss
                 

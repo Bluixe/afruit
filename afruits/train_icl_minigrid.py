@@ -277,149 +277,60 @@ if __name__ == '__main__':
             raise NotImplementedError
         else:
             start_time = time.time()
-            if not predict_value:
-                with torch.no_grad():
-                    epoch_test_loss = 0.0
-                    epoch_test_original_loss = 0.0
-                    pbar = tqdm(enumerate(test_loader), total=len(test_loader), desc=f"Test Epoch {epoch+1}")
-                    for i, batch in pbar:
-                        batch = {k: v.to(device) for k, v in batch.items()}
-                        true_actions = batch['context_actions']
-                        pred_actions = model(batch)
-                        true_actions = true_actions.reshape(-1).long()
-                        pred_actions = pred_actions.reshape(-1, action_dim)
-                        
-                        loss = loss_fn(pred_actions, true_actions)
-                        batch_loss = loss.item() / horizon
-                        epoch_test_loss += batch_loss
-                        pbar.set_postfix({'loss': batch_loss})
-                test_loss.append(epoch_test_loss / len(test_dataset))
-                end_time = time.time()
-                logger.info(f"Test loss: {test_loss[-1]}")
-                logger.info(f"Test time: {end_time - start_time}")
+            with torch.no_grad():
+                epoch_test_loss = 0.0
+                epoch_test_original_loss = 0.0
+                pbar = tqdm(enumerate(test_loader), total=len(test_loader), desc=f"Test Epoch {epoch+1}")
+                for i, batch in pbar:
+                    batch = {k: v.to(device) for k, v in batch.items()}
+                    true_actions = batch['context_actions']
+                    pred_actions = model(batch)
+                    true_actions = true_actions.reshape(-1).long()
+                    pred_actions = pred_actions.reshape(-1, action_dim)
+                    
+                    loss = loss_fn(pred_actions, true_actions)
+                    batch_loss = loss.item() / horizon
+                    epoch_test_loss += batch_loss
+                    pbar.set_postfix({'loss': batch_loss})
+            test_loss.append(epoch_test_loss / len(test_dataset))
+            end_time = time.time()
+            logger.info(f"Test loss: {test_loss[-1]}")
+            logger.info(f"Test time: {end_time - start_time}")
             
-            else:
-                with torch.no_grad():
-                    epoch_test_loss = 0.0
-                    epoch_test_action_loss = 0.0
-                    epoch_test_value_loss = 0.0
-                    pbar = tqdm(enumerate(test_loader), total=len(test_loader), desc=f"Test Epoch {epoch+1}")
-                    for i, batch in pbar:
-                        batch = {k: v.to(device) for k, v in batch.items()}
-                        true_actions = batch['context_actions']
-                        if predict_value:
-                            true_values = batch['context_rewards']
-                        else:
-                            true_values = batch['context_values']
-                        pred_actions, pred_values = model(batch)
-                        true_actions = true_actions.reshape(-1).long()
-                        pred_actions = pred_actions.reshape(-1, action_dim)
-
-                        loss_action = loss_fn(pred_actions, true_actions)
-                        loss_value = torch.nn.functional.mse_loss(pred_values, true_values, reduction='sum')
-                        loss = loss_action + loss_value
-                        batch_loss = loss.item() / horizon
-                        epoch_test_loss += batch_loss
-                        epoch_test_action_loss += loss_action.item() / horizon
-                        epoch_test_value_loss += loss_value.item() / horizon
-                        pbar.set_postfix({'loss': batch_loss})
-                test_loss.append(epoch_test_loss / len(test_dataset))
-                # print(pred_actions)
-                end_time = time.time()
-                logger.info(f"Test loss: {test_loss[-1]}")
-                logger.info(f"Test action loss: {epoch_test_action_loss / len(test_dataset)}")
-                logger.info(f"Test value loss: {epoch_test_value_loss / len(test_dataset)}")
-                logger.info(f"Test time: {end_time - start_time}")
-
 
 
         # TRAINING
 
-        if mode == 'dpt':
-            raise NotImplementedError
-        else:
-            epoch_train_loss = 0.0
-            start_time = time.time()
+        epoch_train_loss = 0.0
+        start_time = time.time()
 
-            pbar = tqdm(enumerate(train_loader), total=len(train_loader), desc=f"Train Epoch {epoch+1}")
-            for i, batch in pbar:
-                batch = {k: v.to(device) for k, v in batch.items()}
-                if not predict_value:
-                # if not use_value and not pred_reward and not sicql:
-                    true_actions = batch['context_actions']
-                    pred_actions = model(batch)
-                    reward = batch['context_rewards']
-                    # print(reward)
+        pbar = tqdm(enumerate(train_loader), total=len(train_loader), desc=f"Train Epoch {epoch+1}")
+        for i, batch in pbar:
+            batch = {k: v.to(device) for k, v in batch.items()}
+            # if not use_value and not pred_reward and not sicql:
+            true_actions = batch['context_actions']
+            pred_actions = model(batch)
+            reward = batch['context_rewards']
+            # print(reward)
 
-                    true_actions = true_actions.reshape(-1).long()
-                    pred_actions = pred_actions.reshape(-1, action_dim)
-                    pred_max_actions = torch.argmax(pred_actions, dim=-1)
-                    pred_max_actions_one_hot = torch.nn.functional.one_hot(pred_max_actions, num_classes=action_dim).float()
-                    num_of_actions = pred_max_actions_one_hot.sum(dim=0) / pred_max_actions_one_hot.shape[0]
+            true_actions = true_actions.reshape(-1).long()
+            pred_actions = pred_actions.reshape(-1, action_dim)
+            pred_max_actions = torch.argmax(pred_actions, dim=-1)
+            pred_max_actions_one_hot = torch.nn.functional.one_hot(pred_max_actions, num_classes=action_dim).float()
+            num_of_actions = pred_max_actions_one_hot.sum(dim=0) / pred_max_actions_one_hot.shape[0]
 
-                    optimizer.zero_grad()
-                    loss = loss_fn(pred_actions, true_actions)
-                        
-                    loss.backward()
-                    optimizer.step()
-                    batch_loss = loss.item() / horizon
-                    
-                    epoch_train_loss += batch_loss
-                    pbar.set_postfix({'loss': batch_loss})
-                    
-                    # 记录每个batch的loss到wandb
-                    wandb.log({"batch_train_loss": batch_loss,
-                            "action_0_prob": num_of_actions[0].item(),
-                            "action_1_prob": num_of_actions[1].item(),
-                            "action_2_prob": num_of_actions[2].item(),
-                            "action_3_prob": num_of_actions[3].item(),
-                            "action_4_prob": num_of_actions[4].item(),
-                            "action_5_prob": num_of_actions[5].item(),
-                            "action_6_prob": num_of_actions[6].item()})
-                else:
-                    true_actions = batch['context_actions']
-                    if predict_value:
-                        true_values = batch['context_rewards']
-                    else:
-                        true_values = batch['context_values']
-                    pred_actions, pred_values = model(batch)
+            optimizer.zero_grad()
+            loss = loss_fn(pred_actions, true_actions)
+                
+            loss.backward()
+            optimizer.step()
+            batch_loss = loss.item() / horizon
+            
+            epoch_train_loss += batch_loss
+            pbar.set_postfix({'loss': batch_loss})
 
-                    true_actions = true_actions.reshape(-1).long()
-                    pred_actions = pred_actions.reshape(-1, action_dim)
-                    pred_max_actions = torch.argmax(pred_actions, dim=-1)
-                    pred_max_actions_one_hot = torch.nn.functional.one_hot(pred_max_actions, num_classes=action_dim).float()
-                    num_of_actions = pred_max_actions_one_hot.sum(dim=0) / pred_max_actions_one_hot.shape[0]
-
-                    optimizer.zero_grad()
-                    loss_action = loss_fn(pred_actions, true_actions)
-                    loss_value = torch.nn.functional.mse_loss(pred_values, true_values, reduction='sum')
-
-                    loss = loss_action + loss_value
-                    loss.backward()
-                    optimizer.step()
-                    batch_loss = loss.item() / horizon
-                    batch_action_loss = loss_action.item() / horizon
-                    batch_value_loss = loss_value.item() / horizon
-
-                    epoch_train_loss += batch_loss
-                    pbar.set_postfix({'loss': batch_loss})
-                    
-                    # 记录每个batch的loss到wandb
-                    wandb.log({"batch_train_loss": batch_loss,
-                            "batch_action_loss": batch_action_loss,
-                            "batch_value_loss": batch_value_loss,
-                            "action_0_prob": num_of_actions[0].item(),
-                            "action_1_prob": num_of_actions[1].item(),
-                            "action_2_prob": num_of_actions[2].item(),
-                            "action_3_prob": num_of_actions[3].item(),
-                            "action_4_prob": num_of_actions[4].item(),
-                            "action_5_prob": num_of_actions[5].item(),
-                            "action_6_prob": num_of_actions[6].item()})
-
-            train_loss.append(epoch_train_loss / len(train_dataset))
-            end_time = time.time()
-            logger.info(f"Train loss: {train_loss[-1]}")
-            logger.info(f"Train time: {end_time - start_time}")
+        train_loss.append(epoch_train_loss / len(train_dataset))
+        end_time = time.time()
             
         # 记录每个epoch的loss到wandb
         wandb.log({

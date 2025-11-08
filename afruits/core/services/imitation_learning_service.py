@@ -141,7 +141,20 @@ class ImitationLearningService:
         self.logger.info("使用自编码器训练方法")
         
         # 创建模型
-        model = self._create_model('AutoencoderModel', model_config)
+        encoder_type = model_config.get('encoder_type', 'lstm')
+        latent_dim = model_config.get('latent_dim', 32)
+        input_dim = model_config.get('input_dim', 512)
+        kl_weight = model_config.get('kl_weight', 0.001)
+        dropout_rate = model_config.get('dropout_rate', 0.2)
+        
+        # 创建自编码器模型
+        model = AutoencoderModel(
+            encoder_type=encoder_type,
+            latent_dim=latent_dim,
+            input_dim=input_dim,
+            kl_weight=kl_weight,
+            dropout_rate=dropout_rate
+        )
         
         # 提取训练参数
         epochs = model_config.get('epochs', 100)
@@ -481,15 +494,19 @@ class ImitationLearningService:
         # 根据模型类型创建模型
         if model_type == 'AutoencoderModel':
             # 提取自编码器模型参数
-            input_dim = model_config.get('input_dim', 32)
-            hidden_dims = model_config.get('hidden_dims', [64, 128, 64])
-            latent_dim = model_config.get('latent_dim', 16)
+            encoder_type = model_config.get('encoder_type', 'lstm')
+            latent_dim = model_config.get('latent_dim', 32)
+            input_dim = model_config.get('input_dim', 512)
+            kl_weight = model_config.get('kl_weight', 0.001)
+            dropout_rate = model_config.get('dropout_rate', 0.2)
             
             # 创建自编码器模型
             model = AutoencoderModel(
+                encoder_type=encoder_type,
+                latent_dim=latent_dim,
                 input_dim=input_dim,
-                hidden_dims=hidden_dims,
-                latent_dim=latent_dim
+                kl_weight=kl_weight,
+                dropout_rate=dropout_rate
             )
             
         elif model_type == 'TransformerModel':
@@ -535,12 +552,20 @@ class ImitationLearningService:
             latent_dim = model_config.get('latent_dim', 16)
             sequence_length = model_config.get('sequence_length', 50)
             
+            # 检查是否有离散动作信息
+            discrete_action = model_config.get('discrete_action', False)
+            
+            # 如果数据中包含离散动作信息，优先使用数据中的信息
+            if 'is_discrete_action' in expert_trajectories:
+                discrete_action = expert_trajectories['is_discrete_action']
+            
             # 创建VAE轨迹生成器
             model = VAETrajGenerator(
                 input_dim=input_dim,
                 hidden_dim=hidden_dim,
                 latent_dim=latent_dim,
-                sequence_length=sequence_length
+                sequence_length=sequence_length,
+                discrete_action=discrete_action
             )
             
         elif model_type == 'AdversarialImitationLearner':
@@ -914,7 +939,9 @@ class ImitationLearningService:
                 return result
             elif isinstance(model, VAETrajGenerator):
                 # 使用VAE轨迹生成器生成
-                result = model.generate(num_samples=num_samples, cond_vector=cond_vector)
+                # 获取温度参数（如果提供）
+                temperature = model_config.get('temperature', 1.0) if model_config else 1.0
+                result = model.generate(num_samples=num_samples, cond_vector=cond_vector, temperature=temperature)
                 return result
             else:
                 raise ValueError(f"不支持的模型类型: {type(model).__name__}")

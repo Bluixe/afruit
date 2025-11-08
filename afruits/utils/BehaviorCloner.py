@@ -85,41 +85,7 @@ class BehaviorCloner:
             2. 自动填充缺失值
             3. 标准化特征到[-1, 1]区间
         """
-        # 初始化结果
-        expert_states = []
-        expert_actions = []
-        
-        # 检查输入数据
-        if not raw_trajectories or not isinstance(raw_trajectories, dict):
-            raise ValueError("expert_trajectories必须是非空字典")
-        
-        # 处理轨迹数据
-        for traj_id, trajectory in raw_trajectories.items():
-            # 检查轨迹数据是否包含状态和动作
-            if 'states' not in trajectory or 'actions' not in trajectory:
-                print(f"警告: 轨迹 {traj_id} 缺少状态或动作数据，已跳过")
-                continue
-            
-            states = trajectory['states']
-            actions = trajectory['actions']
-            
-            # 检查状态和动作数据长度是否匹配
-            if len(states) != len(actions):
-                print(f"警告: 轨迹 {traj_id} 的状态和动作数据长度不匹配，已跳过")
-                continue
-            
-            # 添加数据
-            expert_states.extend(states)
-            expert_actions.extend(actions)
-        
-        # 转换为numpy数组
-        if expert_states and expert_actions:
-            expert_states = np.array(expert_states)
-            expert_actions = np.array(expert_actions)
-        else:
-            raise ValueError("处理后的数据为空，请检查输入数据")
-        
-        print(f"数据预处理完成: expert_states shape: {expert_states.shape}, expert_actions shape: {expert_actions.shape}")
+        expert_states, expert_actions = self.dataloader_util.load_bc_gail_data(expert_trajectories)
         return expert_states, expert_actions
     
     def extract_features(self, state_data: np.ndarray) -> Dict:

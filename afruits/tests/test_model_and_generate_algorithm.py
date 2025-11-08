@@ -27,21 +27,19 @@ class TestModelAndGenerateAlgorithm(unittest.TestCase):
     def create_trajectory_data(self):
         """创建轨迹数据"""
         # 创建模拟的轨迹数据
-        trajectories = {}
+        trajectories = []
+        # 创建长序列轨迹(batch_size, seq_length, state_dim)
         
         # 创建10条轨迹
         for i in range(10):
-            # 每条轨迹包含20个时间步
-            states = np.random.rand(20, 10)  # 10维状态空间
-            actions = np.random.rand(20, 5)  # 5维动作空间
+            # 每条轨迹包含40个时间步
+            states = np.random.rand(40, 10)  # 10维状态空间
+            actions = np.random.rand(40, 5)  # 5维动作空间
             
-            trajectories[f'traj_{i}'] = {
+            trajectories.append({
                 'states': states,
                 'actions': actions,
-                'rewards': np.random.rand(20),  # 随机奖励
-                'dones': np.zeros(20),  # 完成标志
-                'infos': [{} for _ in range(20)]  # 额外信息
-            }
+            })
         
         return trajectories
     
@@ -52,16 +50,13 @@ class TestModelAndGenerateAlgorithm(unittest.TestCase):
         
         # 创建5条测试轨迹
         for i in range(5):
-            # 每条轨迹包含10个时间步
-            states = np.random.rand(10, 10)  # 10维状态空间
-            actions = np.random.rand(10, 5)  # 5维动作空间
+            # 每条轨迹包含20个时间步
+            states = np.random.rand(40, 10)  # 10维状态空间
+            actions = np.random.rand(40, 5)  # 5维动作空间
             
             test_trajectories.append({
                 'states': states,
                 'actions': actions,
-                'rewards': np.random.rand(10),  # 随机奖励
-                'dones': np.zeros(10),  # 完成标志
-                'infos': [{} for _ in range(10)]  # 额外信息
             })
         
         return test_trajectories
