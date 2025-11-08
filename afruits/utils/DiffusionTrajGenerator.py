@@ -122,9 +122,9 @@ class DiffusionTrajGenerator:
             state_dim = state_dim[0]
 
         # 构建U-Net结构的扩散模型
+        # 完全重新设计的 DiffusionUNet 模型
         class DiffusionUNet(nn.Module):
-            def __init__(self, total_dim, cond_dim, time_emb_dim=128,
-                         dropout=0.2):
+            def __init__(self, total_dim, cond_dim, time_emb_dim=128, dropout=0.2):
                 super().__init__()
                 self.total_dim = total_dim
                 self.dropout = dropout
@@ -143,42 +143,25 @@ class DiffusionTrajGenerator:
                     nn.Linear(time_emb_dim, time_emb_dim),
                 ) if cond_dim > 0 else None
                 
-                # 编码器 - 使用固定的维度以确保一致性
-                hidden_dims = [128, 256, 512]
-                
-                self.encoder = nn.ModuleList()
-                # 第一层特殊处理，因为输入包含时间嵌入
-                self.encoder.append(nn.Linear(total_dim + time_emb_dim, hidden_dims[0]))
-                
-                # 后续编码器层
-                for i in range(len(hidden_dims) - 1):
-                    self.encoder.append(nn.Linear(hidden_dims[i], hidden_dims[i + 1]))
-                
-                # 中间层
-                self.middle = nn.Sequential(
-                    nn.Linear(hidden_dims[-1], hidden_dims[-1]),
+                self.model = nn.Sequential(
+                    nn.Linear(total_dim + time_emb_dim, 256),
                     nn.SiLU(),
-                    nn.Linear(hidden_dims[-1], hidden_dims[-1]),
+                    nn.Dropout(dropout),
+                    nn.Linear(256, 512),
+                    nn.SiLU(),
+                    nn.Dropout(dropout),
+                    nn.Linear(512, 512),
+                    nn.SiLU(),
+                    nn.Dropout(dropout),
+                    nn.Linear(512, 256),
+                    nn.SiLU(),
+                    nn.Dropout(dropout),
+                    nn.Linear(256, total_dim)
                 )
-                
-                # 解码器 - 明确定义每一层的输入和输出维度
-                self.decoder = nn.ModuleList()
-                
-                # 第一个解码器层: 512 + 256 -> 256
-                self.decoder.append(nn.Linear(hidden_dims[-1] + hidden_dims[-2], hidden_dims[-2]))
-                
-                # 第二个解码器层: 256 + 128 -> 128
-                self.decoder.append(nn.Linear(hidden_dims[-2] + hidden_dims[-3], hidden_dims[-3]))
-                
-                # 最后一个解码器层: 128 + total_dim -> total_dim
-                self.decoder.append(nn.Linear(hidden_dims[-3] + total_dim, total_dim))
-                
-                # 激活函数
-                self.act = nn.SiLU()
                 
             def forward(self, x_state=None, t=None, cond=None):
                 """
-                前向传播函数
+                前向传播函数 - 简化版本，不使用跳跃连接
                 
                 参数:
                     x_state: 输入状态，可以是 [batch_size, seq_len, feature_dim] 或 [batch_size, feature_dim]
@@ -202,34 +185,13 @@ class DiffusionTrajGenerator:
                     c_emb = self.cond_embed(cond)
                     t_emb = t_emb + c_emb
                 
-                # 初始特征
+                # 连接输入和时间嵌入
                 h = torch.cat([x, t_emb], dim=-1).float()
                 
-                # 编码器前向传播 - 存储跳跃连接
-                skip_connections = [x]  # 存储原始输入作为第一个跳跃连接
+                # 直接通过MLP模型
+                output = self.model(h)
                 
-                for layer in self.encoder:
-                    h = self.act(layer(h))
-                    skip_connections.append(h)
-                
-                # 中间层处理
-                h = self.middle(h)
-                
-                # 解码器前向传播 - 小心处理跳跃连接
-                for i, layer in enumerate(self.decoder):
-                    # 获取对应的跳跃连接
-                    skip = skip_connections[-(i+1)]
-                    
-                    # 连接特征
-                    h = torch.cat([h, skip], dim=-1)
-                    
-                    # 应用线性层和激活函数
-                    if i < len(self.decoder) - 1:
-                        h = self.act(layer(h))
-                    else:
-                        h = layer(h)  # 最后一层不使用激活函数
-                
-                return h
+                return output
         
         # 创建模型
         model = DiffusionUNet(
@@ -292,17 +254,28 @@ class DiffusionTrajGenerator:
                                     torch.sqrt(1 - alphas_cumprod_t) * noise
                 
                 # 预测噪声
-                # 确保输入形状正确
+                # 处理输入形状
+                batch_size = noisy_trajectories.shape[0]
+                
                 if len(noisy_trajectories.shape) == 3:  # [batch_size, seq_len, feature_dim]
-                    # 模型只处理最后一个时间步，所以我们需要单独处理
-                    predicted_noise = self.model(x_state=noisy_trajectories, t=t / self.diffusion_steps)
+                    # 对于序列输入，我们需要特殊处理
+                    seq_len = noisy_trajectories.shape[1]
+                    feature_dim = noisy_trajectories.shape[2]
                     
-                    # 确保预测噪声的形状与原始噪声匹配
-                    if predicted_noise.shape != noise.shape:
-                        # 如果是最后一个时间步的预测，则需要扩展到整个序列
-                        if len(predicted_noise.shape) == 2 and len(noise.shape) == 3:
-                            predicted_noise = predicted_noise.unsqueeze(1).expand(-1, noise.shape[1], -1)
+                    # 我们只预测最后一个时间步的噪声，然后扩展到整个序列
+                    last_step = noisy_trajectories[:, -1, :]
+                    t_normalized = t / self.diffusion_steps
+                    
+                    # 预测噪声
+                    predicted_last_step_noise = self.model(x_state=last_step.unsqueeze(1), t=t_normalized)
+                    
+                    # 扩展到整个序列
+                    if len(predicted_last_step_noise.shape) == 2:
+                        predicted_noise = predicted_last_step_noise.unsqueeze(1).expand(-1, seq_len, -1)
+                    else:
+                        predicted_noise = predicted_last_step_noise.expand(-1, seq_len, -1)
                 else:
+                    # 对于非序列输入，直接预测
                     predicted_noise = self.model(x_state=noisy_trajectories, t=t / self.diffusion_steps)
                 
                 # 计算损失
@@ -361,22 +334,22 @@ class DiffusionTrajGenerator:
             # 无梯度计算
             with torch.no_grad():
                 # 预测噪声
-                # 确保输入形状正确
-                if len(x.shape) == 2:  # [batch_size, feature_dim]
-                    x_input = x.unsqueeze(1)  # 添加序列维度 [batch_size, 1, feature_dim]
-                else:
-                    x_input = x
-                
-                # 使用模型预测噪声
+                # 确保输入形状正确并进行预测
                 try:
-                    predicted_noise = self.model(x_state=x_input, t=t, cond=cond_data)
+                    # 对于生成过程，我们总是使用2D输入 [batch_size, feature_dim]
+                    # 不需要添加序列维度，因为我们的模型已经设计为处理非序列输入
+                    predicted_noise = self.model(x_state=x, t=t, cond=cond_data)
                 except RuntimeError as e:
                     # 如果出现维度不匹配错误，打印详细信息以便调试
                     print(f"生成过程中出现错误: {e}")
-                    print(f"输入形状: {x_input.shape}, t形状: {t.shape}")
+                    print(f"输入形状: {x.shape}, t形状: {t.shape}")
                     if cond_data is not None:
                         print(f"条件数据形状: {cond_data.shape}")
-                    raise
+                    
+                    # 尝试使用备用方法
+                    print("尝试使用备用方法...")
+                    x_reshaped = x.view(batch_size, -1)  # 确保输入是2D的 [batch_size, feature_dim]
+                    predicted_noise = self.model(x_state=x_reshaped, t=t, cond=cond_data)
                 
                 # 计算去噪步骤
                 alpha = self.alphas[i]
