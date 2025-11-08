@@ -885,7 +885,7 @@ class ImitationLearningService:
                 input_seq = input_seq.to(self.device)
             
             # 根据模型类型选择不同的预测方法
-            if isinstance(model, TransformerModel):
+            if isinstance(model, TransformerTrainer):
                 # 使用Transformer模型预测
                 with torch.no_grad():
                     result = model.predict(input_seq, pred_steps=steps)
@@ -933,7 +933,7 @@ class ImitationLearningService:
             elif isinstance(model, VAETrajGenerator):
                 # 使用VAE轨迹生成器生成
                 # 获取温度参数（如果提供）
-                temperature = model_config.get('temperature', 1.0) if model_config else 1.0
+                temperature = 1.0
                 result = model.generate(num_samples=num_samples, cond_vector=cond_vector, temperature=temperature)
                 return result
             else:

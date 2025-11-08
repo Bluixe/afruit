@@ -125,7 +125,7 @@ class TestModelAndGenerateAlgorithm(unittest.TestCase):
         # 测试评估功能
         test_data = self.create_trajectory_test_data()
         eval_config = {
-            'method': 'reconstruction',
+            'method': 'offline',
             'metrics': ['mse', 'mae']
         }
         
@@ -184,7 +184,7 @@ class TestModelAndGenerateAlgorithm(unittest.TestCase):
         # 测试评估功能
         test_data = self.create_trajectory_test_data()
         eval_config = {
-            'method': 'prediction',
+            'method': 'offline',
             'metrics': ['mse', 'mae'],
             'prediction_steps': 5
         }
@@ -315,7 +315,7 @@ class TestModelAndGenerateAlgorithm(unittest.TestCase):
         # 测试评估功能
         test_data = self.create_trajectory_test_data()
         eval_config = {
-            'method': 'generation',
+            'method': 'offline',
             'metrics': ['reconstruction', 'kl_divergence'],
             'num_samples': 10
         }
