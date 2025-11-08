@@ -104,8 +104,8 @@ class TestModelAndGenerateAlgorithm(unittest.TestCase):
         training_metrics = result['training_metrics']
         
         print(f"模型ID: {model_id}")
-        print(f"训练损失: {training_metrics['final_train_loss']:.4f}")
-        print(f"验证损失: {training_metrics['final_val_loss']:.4f}")
+        # print(f"训练损失: {training_metrics['final_train_loss']:.4f}")
+        # print(f"验证损失: {training_metrics['final_val_loss']:.4f}")
         
         # 测试编码功能
         state = np.random.rand(1, 10, 10)  # 假设状态是1个批次，10个时间步，每个时间步10个特征
@@ -170,8 +170,8 @@ class TestModelAndGenerateAlgorithm(unittest.TestCase):
         training_metrics = result['training_metrics']
         
         print(f"模型ID: {model_id}")
-        print(f"训练损失: {training_metrics['final_train_loss']:.4f}")
-        print(f"验证损失: {training_metrics['final_val_loss']:.4f}")
+        # print(f"训练损失: {training_metrics['final_train_loss']:.4f}")
+        # print(f"验证损失: {training_metrics['final_val_loss']:.4f}")
         
         # 测试预测功能
         state = np.random.rand(1, 5, 10)  # 假设状态是1个批次，5个时间步，每个时间步10个特征
@@ -291,8 +291,8 @@ class TestModelAndGenerateAlgorithm(unittest.TestCase):
         
         print(f"模型ID: {model_id}")
         print(f"总损失: {training_metrics['final_total_loss']:.4f}")
-        print(f"重构损失: {training_metrics['final_recon_loss']:.4f}")
-        print(f"KL散度: {training_metrics['final_kl_loss']:.4f}")
+        # print(f"重构损失: {training_metrics['final_recon_loss']:.4f}")
+        # print(f"KL散度: {training_metrics['final_kl_loss']:.4f}")
         
         # 测试生成功能
         generated = self.api.trajectory_generation_service.generate(model_id, num_samples=5)
