@@ -143,31 +143,51 @@ class DiffusionTrajGenerator:
                     nn.Linear(time_emb_dim, time_emb_dim),
                 ) if cond_dim > 0 else None
                 
-                # 编码器
-                self.encoder = nn.ModuleList([
-                    nn.Linear(total_dim + time_emb_dim, 128),
-                    nn.Linear(128, 256),
-                    nn.Linear(256, 512),
-                ])
+                # 编码器 - 使用固定的维度以确保一致性
+                hidden_dims = [128, 256, 512]
+                
+                self.encoder = nn.ModuleList()
+                # 第一层特殊处理，因为输入包含时间嵌入
+                self.encoder.append(nn.Linear(total_dim + time_emb_dim, hidden_dims[0]))
+                
+                # 后续编码器层
+                for i in range(len(hidden_dims) - 1):
+                    self.encoder.append(nn.Linear(hidden_dims[i], hidden_dims[i + 1]))
                 
                 # 中间层
                 self.middle = nn.Sequential(
-                    nn.Linear(512, 512),
+                    nn.Linear(hidden_dims[-1], hidden_dims[-1]),
                     nn.SiLU(),
-                    nn.Linear(512, 512),
+                    nn.Linear(hidden_dims[-1], hidden_dims[-1]),
                 )
                 
-                # 解码器
-                self.decoder = nn.ModuleList([
-                    nn.Linear(512 + 256, 256),
-                    nn.Linear(256 + 128, 128),
-                    nn.Linear(128 + total_dim, total_dim),
-                ])
+                # 解码器 - 明确定义每一层的输入和输出维度
+                self.decoder = nn.ModuleList()
+                
+                # 第一个解码器层: 512 + 256 -> 256
+                self.decoder.append(nn.Linear(hidden_dims[-1] + hidden_dims[-2], hidden_dims[-2]))
+                
+                # 第二个解码器层: 256 + 128 -> 128
+                self.decoder.append(nn.Linear(hidden_dims[-2] + hidden_dims[-3], hidden_dims[-3]))
+                
+                # 最后一个解码器层: 128 + total_dim -> total_dim
+                self.decoder.append(nn.Linear(hidden_dims[-3] + total_dim, total_dim))
                 
                 # 激活函数
                 self.act = nn.SiLU()
                 
             def forward(self, x_state=None, t=None, cond=None):
+                """
+                前向传播函数
+                
+                参数:
+                    x_state: 输入状态，可以是 [batch_size, seq_len, feature_dim] 或 [batch_size, feature_dim]
+                    t: 时间步，形状为 [batch_size]
+                    cond: 条件信息，可选
+                    
+                返回:
+                    预测的噪声
+                """
                 # 处理输入
                 if len(x_state.shape) == 3:  # [batch_size, seq_len, feature_dim]
                     x = x_state[:, -1, :]  # 取最后一个时间步
@@ -185,23 +205,29 @@ class DiffusionTrajGenerator:
                 # 初始特征
                 h = torch.cat([x, t_emb], dim=-1).float()
                 
-                # 编码器前向传播
-                skip_connections = [x]
+                # 编码器前向传播 - 存储跳跃连接
+                skip_connections = [x]  # 存储原始输入作为第一个跳跃连接
+                
                 for layer in self.encoder:
                     h = self.act(layer(h))
                     skip_connections.append(h)
                 
-                # 中间层
+                # 中间层处理
                 h = self.middle(h)
                 
-                # 解码器前向传播
+                # 解码器前向传播 - 小心处理跳跃连接
                 for i, layer in enumerate(self.decoder):
-                    # 确保跳跃连接的维度正确
+                    # 获取对应的跳跃连接
                     skip = skip_connections[-(i+1)]
+                    
                     # 连接特征
                     h = torch.cat([h, skip], dim=-1)
-                    # 应用线性层
-                    h = self.act(layer(h)) if i < len(self.decoder) - 1 else layer(h)
+                    
+                    # 应用线性层和激活函数
+                    if i < len(self.decoder) - 1:
+                        h = self.act(layer(h))
+                    else:
+                        h = layer(h)  # 最后一层不使用激活函数
                 
                 return h
         
@@ -266,13 +292,18 @@ class DiffusionTrajGenerator:
                                     torch.sqrt(1 - alphas_cumprod_t) * noise
                 
                 # 预测噪声
-                predicted_noise = self.model(x_state=noisy_trajectories, t=t / self.diffusion_steps)
-                
-                # 确保预测噪声的形状与原始噪声匹配
-                if predicted_noise.shape != noise.shape:
-                    # 如果是最后一个时间步的预测，则需要扩展到整个序列
-                    if len(predicted_noise.shape) == 2 and len(noise.shape) == 3:
-                        predicted_noise = predicted_noise.unsqueeze(1).expand(-1, noise.shape[1], -1)
+                # 确保输入形状正确
+                if len(noisy_trajectories.shape) == 3:  # [batch_size, seq_len, feature_dim]
+                    # 模型只处理最后一个时间步，所以我们需要单独处理
+                    predicted_noise = self.model(x_state=noisy_trajectories, t=t / self.diffusion_steps)
+                    
+                    # 确保预测噪声的形状与原始噪声匹配
+                    if predicted_noise.shape != noise.shape:
+                        # 如果是最后一个时间步的预测，则需要扩展到整个序列
+                        if len(predicted_noise.shape) == 2 and len(noise.shape) == 3:
+                            predicted_noise = predicted_noise.unsqueeze(1).expand(-1, noise.shape[1], -1)
+                else:
+                    predicted_noise = self.model(x_state=noisy_trajectories, t=t / self.diffusion_steps)
                 
                 # 计算损失
                 loss = self.loss_fn(predicted_noise, noise)
@@ -336,7 +367,16 @@ class DiffusionTrajGenerator:
                 else:
                     x_input = x
                 
-                predicted_noise = self.model(x_state=x_input, t=t, cond=cond_data)
+                # 使用模型预测噪声
+                try:
+                    predicted_noise = self.model(x_state=x_input, t=t, cond=cond_data)
+                except RuntimeError as e:
+                    # 如果出现维度不匹配错误，打印详细信息以便调试
+                    print(f"生成过程中出现错误: {e}")
+                    print(f"输入形状: {x_input.shape}, t形状: {t.shape}")
+                    if cond_data is not None:
+                        print(f"条件数据形状: {cond_data.shape}")
+                    raise
                 
                 # 计算去噪步骤
                 alpha = self.alphas[i]

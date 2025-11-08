@@ -199,14 +199,14 @@ class VAETrajGenerator:
                 lstm_out, (h_n, c_n) = self.lstm(x)
                 
                 # 使用最后一个时间步的输出
-                hidden = lstm_out[:, -1, :]
+                hidden = lstm_out
                 
                 # 特征处理
                 hidden = self.fc_out(hidden)
                 
                 # 计算均值和对数方差
-                mu = self.fc_mu(lstm_out[:, -1, :])
-                logvar = self.fc_logvar(lstm_out[:, -1, :])
+                mu = self.fc_mu(lstm_out)
+                logvar = self.fc_logvar(lstm_out)
                 
                 return mu, logvar
         
