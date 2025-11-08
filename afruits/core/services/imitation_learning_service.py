@@ -757,3 +757,168 @@ class ImitationLearningService:
             Dict: 模型字典
         """
         return self.models
+    
+    def encode(self, model_id: str, input_data: Any) -> Any:
+        """
+        使用模型编码输入数据
+        
+        参数:
+            model_id (str): 模型ID
+            input_data (Any): 输入数据
+            
+        返回:
+            Any: 编码结果
+        """
+        self.logger.info(f"使用模型 {model_id} 编码数据")
+        
+        # 检查模型是否存在
+        if model_id not in self.models:
+            raise ValueError(f"模型不存在: {model_id}")
+        
+        # 获取模型
+        model = self.models[model_id]
+        
+        try:
+            # 确保输入数据是张量
+            if not isinstance(input_data, torch.Tensor):
+                input_data = torch.tensor(input_data, dtype=torch.float32).to(self.device)
+            else:
+                input_data = input_data.to(self.device)
+            
+            # 根据模型类型选择不同的编码方法
+            if isinstance(model, AutoencoderModel):
+                # 使用自编码器模型编码
+                with torch.no_grad():
+                    encoded = model.encode(input_data)
+                return encoded
+            else:
+                raise ValueError(f"不支持的模型类型: {type(model).__name__}")
+            
+        except Exception as e:
+            self.logger.error(f"编码失败: {str(e)}")
+            raise
+    
+    def decode(self, model_id: str, latent_code: Any) -> Any:
+        """
+        使用模型解码潜在编码
+        
+        参数:
+            model_id (str): 模型ID
+            latent_code (Any): 潜在编码
+            
+        返回:
+            Any: 解码结果
+        """
+        self.logger.info(f"使用模型 {model_id} 解码数据")
+        
+        # 检查模型是否存在
+        if model_id not in self.models:
+            raise ValueError(f"模型不存在: {model_id}")
+        
+        # 获取模型
+        model = self.models[model_id]
+        
+        try:
+            # 确保潜在编码是张量
+            if not isinstance(latent_code, torch.Tensor):
+                latent_code = torch.tensor(latent_code, dtype=torch.float32).to(self.device)
+            else:
+                latent_code = latent_code.to(self.device)
+            
+            # 根据模型类型选择不同的解码方法
+            if isinstance(model, AutoencoderModel):
+                # 使用自编码器模型解码
+                with torch.no_grad():
+                    decoded = model.decode(latent_code)
+                return decoded
+            else:
+                raise ValueError(f"不支持的模型类型: {type(model).__name__}")
+            
+        except Exception as e:
+            self.logger.error(f"解码失败: {str(e)}")
+            raise
+    
+    def predict_next(self, model_id: str, input_seq: Any, steps: int = 1) -> Any:
+        """
+        预测下一个时间步
+        
+        参数:
+            model_id (str): 模型ID
+            input_seq (Any): 输入序列
+            steps (int): 预测步数
+            
+        返回:
+            Any: 预测结果
+        """
+        self.logger.info(f"使用模型 {model_id} 预测下一个时间步")
+        
+        # 检查模型是否存在
+        if model_id not in self.models:
+            raise ValueError(f"模型不存在: {model_id}")
+        
+        # 获取模型
+        model = self.models[model_id]
+        
+        try:
+            # 确保输入序列是张量
+            if not isinstance(input_seq, torch.Tensor):
+                input_seq = torch.tensor(input_seq, dtype=torch.float32).to(self.device)
+            else:
+                input_seq = input_seq.to(self.device)
+            
+            # 根据模型类型选择不同的预测方法
+            if isinstance(model, TransformerModel):
+                # 使用Transformer模型预测
+                with torch.no_grad():
+                    result = model.predict(input_seq, pred_steps=steps)
+                return result.get('trajectory', None)
+            else:
+                raise ValueError(f"不支持的模型类型: {type(model).__name__}")
+            
+        except Exception as e:
+            self.logger.error(f"预测失败: {str(e)}")
+            raise
+    
+    def generate(self, model_id: str, num_samples: int = 1, cond_vector: Any = None) -> Dict:
+        """
+        生成轨迹
+        
+        参数:
+            model_id (str): 模型ID
+            num_samples (int): 生成数量
+            cond_vector (Any): 条件向量
+            
+        返回:
+            Dict: 生成结果
+        """
+        self.logger.info(f"使用模型 {model_id} 生成轨迹")
+        
+        # 检查模型是否存在
+        if model_id not in self.models:
+            raise ValueError(f"模型不存在: {model_id}")
+        
+        # 获取模型
+        model = self.models[model_id]
+        
+        try:
+            # 确保条件向量是张量（如果提供）
+            if cond_vector is not None and not isinstance(cond_vector, torch.Tensor):
+                cond_vector = torch.tensor(cond_vector, dtype=torch.float32).to(self.device)
+            elif cond_vector is not None:
+                cond_vector = cond_vector.to(self.device)
+            
+            # 根据模型类型选择不同的生成方法
+            if isinstance(model, DiffusionTrajGenerator):
+                # 使用扩散轨迹生成器生成
+                result = model.generate(batch_size=num_samples)
+                return result
+            elif isinstance(model, VAETrajGenerator):
+                # 使用VAE轨迹生成器生成
+                result = model.generate(num_samples=num_samples, cond_vector=cond_vector)
+                return result
+            else:
+                raise ValueError(f"不支持的模型类型: {type(model).__name__}")
+            
+        except Exception as e:
+            self.logger.error(f"生成失败: {str(e)}")
+            raise

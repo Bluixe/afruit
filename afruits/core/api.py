@@ -68,6 +68,10 @@ class AlgorithmAPI:
         self.imitation_learning_service = ImitationLearningService(self.config, self.logger)
         self.visualization_service = VisualizationService(self.config, self.logger)
         
+        # 轨迹建模和生成服务
+        self.trajectory_modeling_service = self.imitation_learning_service
+        self.trajectory_generation_service = self.imitation_learning_service
+        
         # 初始化数据预处理器
         self.data_preprocessor = DataPreprocessor()
         self.trajectory_preprocessor = TrajectoryPreprocessor()
@@ -436,3 +440,59 @@ class AlgorithmAPI:
         }
         
         return models
+    
+    def train_trajectory_model(self, training_data: Dict, model_config: Dict) -> Dict:
+        """
+        训练轨迹模型
+        
+        参数:
+            training_data (Dict): 训练数据
+            model_config (Dict): 模型配置
+            
+        返回:
+            Dict: 训练结果，包含模型和训练指标
+        """
+        self.logger.info("开始训练轨迹模型")
+        
+        try:
+            # 确保model_config中包含training_method
+            if 'training_method' not in model_config:
+                model_config['training_method'] = 'standard'
+                
+            # 使用模仿学习服务训练模型
+            result = self.imitation_learning_service.train_model(training_data, model_config)
+            
+            self.logger.info("轨迹模型训练完成")
+            return result
+            
+        except Exception as e:
+            self.logger.error(f"轨迹模型训练失败: {str(e)}")
+            raise
+    
+    def train_trajectory_generator(self, training_data: Dict, model_config: Dict) -> Dict:
+        """
+        训练轨迹生成器
+        
+        参数:
+            training_data (Dict): 训练数据
+            model_config (Dict): 模型配置
+            
+        返回:
+            Dict: 训练结果，包含模型和训练指标
+        """
+        self.logger.info("开始训练轨迹生成器")
+        
+        try:
+            # 确保model_config中包含training_method
+            if 'training_method' not in model_config:
+                model_config['training_method'] = 'standard'
+                
+            # 使用模仿学习服务训练模型
+            result = self.imitation_learning_service.train_model(training_data, model_config)
+            
+            self.logger.info("轨迹生成器训练完成")
+            return result
+            
+        except Exception as e:
+            self.logger.error(f"轨迹生成器训练失败: {str(e)}")
+            raise
