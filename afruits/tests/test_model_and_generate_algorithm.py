@@ -33,9 +33,9 @@ class TestModelAndGenerateAlgorithm(unittest.TestCase):
         # 创建10条轨迹
         for i in range(10):
             # 每条轨迹包含40个时间步
-            states = np.random.rand(40, 10)  # 10维状态空间
+            states = np.random.rand(80, 10)  # 10维状态空间
             # 离散动作空间，动作维度为5
-            actions = np.random.randint(0, 5, size=(40,))  # 离散动作空间
+            actions = np.random.randint(0, 5, size=(80,))  # 离散动作空间
             
             trajectories.append({
                 'states': states,
@@ -55,9 +55,9 @@ class TestModelAndGenerateAlgorithm(unittest.TestCase):
         # 创建5条测试轨迹
         for i in range(5):
             # 每条轨迹包含40个时间步
-            states = np.random.rand(40, 10)  # 10维状态空间
+            states = np.random.rand(80, 10)  # 10维状态空间
             # 离散动作空间，动作维度为5
-            actions = np.random.randint(0, 5, size=(40,))  # 离散动作空间
+            actions = np.random.randint(0, 5, size=(80,))  # 离散动作空间
             
             test_trajectories.append({
                 'states': states,

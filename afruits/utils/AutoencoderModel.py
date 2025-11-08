@@ -364,7 +364,7 @@ class AutoencoderModel(nn.Module):
         
         return output, z
     
-    def train(self, data_loader, val_loader=None, epochs=10, learning_rate=0.001, process_actions=True):
+    def train_model(self, data_loader, val_loader=None, epochs=10, learning_rate=0.001, process_actions=True):
         """
         训练模型
         

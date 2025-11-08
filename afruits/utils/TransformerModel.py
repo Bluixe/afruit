@@ -74,7 +74,7 @@ class TransformerModel(nn.Module):
         self.embed_ln = nn.LayerNorm(self.d_model)
         
         # 输出层 - 预测动作
-        self.pred_actions = nn.Linear(self.d_model, self.action_dim)
+        self.pred_actions = None
         
         # 数据加载器
         self.dataloader_util = DataLoaderUtil()
@@ -175,7 +175,7 @@ class TransformerModel(nn.Module):
             self.input_embedding = nn.Linear(self.input_dim, self.d_model)
         
         # 输出层
-        self.output_layer = nn.Linear(self.d_model, output_dim)
+        self.predict_actions = nn.Linear(self.d_model, output_dim)
         
         return self
     

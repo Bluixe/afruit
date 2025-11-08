@@ -237,6 +237,7 @@ class DiffusionTrajGenerator:
             
             for batch in dataloader:
                 # 获取轨迹数据
+                print(batch)
                 trajectories = batch[0].to(self.device)
                 batch_size = trajectories.shape[0]
                 
