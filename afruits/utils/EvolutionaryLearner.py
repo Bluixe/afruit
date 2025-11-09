@@ -892,33 +892,7 @@ class EvolutionaryLearner:
         # 训练每个策略
         for policy in self.population:
             try:
-                # 根据策略类型进行训练
-                if isinstance(policy, OfflineRLearner):
-                    # 预处理数据为ReplayBuffer格式
-                    buffer = policy.preprocess_data(raw_trajectories)
-                    # 训练离线强化学习策略
-                    history = policy.train(buffer, epochs=epochs, batch_size=batch_size)
-                    
-                elif isinstance(policy, BehaviorCloner):
-                    # 处理数据为行为克隆格式
-                    X_train, y_train = policy.process_data(raw_trajectories)
-                    # 训练行为克隆策略
-                    history = policy.train_model(X_train, y_train)
-                    
-                elif isinstance(policy, AdversarialImitationLearner):
-                    # 预处理数据为对抗模仿学习格式
-                    expert_states, expert_actions = policy.preprocess_data(raw_trajectories)
-                    # 构建模型
-                    policy.build_models()
-                    # 训练对抗模仿学习策略
-                    expert_data = {
-                        'expert_states': expert_states,
-                        'expert_actions': expert_actions
-                    }
-                    history = policy.train(expert_data, batch_size=batch_size, epochs=epochs)
-                
-                # 根据模型类型选择不同的训练方法
-                elif self.model_type == "AutoencoderModel":
+                if self.model_type == "AutoencoderModel":
                     # 准备数据加载器
                     data_loader = policy.load_sequences(data, batch_size=batch_size)
                     # 训练自编码器模型

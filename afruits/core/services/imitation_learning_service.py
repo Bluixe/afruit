@@ -351,88 +351,81 @@ class ImitationLearningService:
             model_config=model_config
         )
         
-        # 初始化模型种群
-        models = []
-        for i in range(population_size):
-            # 创建模型
-            if model_type == 'AutoencoderModel':
-                encoder_type = model_config.get('encoder_type', 'lstm')
-                latent_dim = model_config.get('latent_dim', 32)
-                kl_weight = model_config.get('kl_weight', 0.001)
-                dropout_rate = model_config.get('dropout_rate', 0.2)
-                
-                model = AutoencoderTrainer(
-                    encoder_type=encoder_type,
-                    latent_dim=latent_dim,
-                    kl_weight=kl_weight,
-                    dropout_rate=dropout_rate
-                )
-                
-                data, state_dim, action_dim, seq_length = expert_trajectories["data"], expert_trajectories["state_dim"], expert_trajectories["action_dim"], expert_trajectories["traj_length"]
-                model.build_model(state_dim, action_dim, seq_length)
-                
-            elif model_type == 'TransformerModel':
-                d_model = model_config.get('d_model', 128)
-                num_heads = model_config.get('num_heads', 4)
-                num_layers = model_config.get('num_layers', 3)
-                max_seq_len = model_config.get('max_seq_len', 100)
-                dropout_rate = model_config.get('dropout_rate', 0.2)
-                
-                model = TransformerTrainer(
-                    d_model=d_model,
-                    num_heads=num_heads,
-                    num_layers=num_layers,
-                    max_seq_len=max_seq_len,
-                    dropout_rate=dropout_rate
-                )
-                
-                data, state_dim, action_dim = expert_trajectories["data"], expert_trajectories["state_dim"], expert_trajectories["action_dim"]
-                model.build_model(state_dim, action_dim)
-                
-            elif model_type == 'DiffusionTrajGenerator':
-                diffusion_steps = model_config.get('diffusion_steps', 1000)
-                noise_schedule = model_config.get('noise_schedule', 'cosine')
-                dropout = model_config.get('dropout', 0.2)
-                im_embd = model_config.get('im_embd', 128)
-                
-                model = DiffusionTrajGenerator(
-                    diffusion_steps=diffusion_steps,
-                    noise_schedule=noise_schedule,
-                    dropout=dropout,
-                    im_embd=im_embd
-                )
-                
-                data, state_dim, action_dim = expert_trajectories["data"], expert_trajectories["state_dim"], expert_trajectories["action_dim"]
-                model.build_model(state_dim)
-                
-            elif model_type == 'VAETrajGenerator':
-                latent_dim = model_config.get('latent_dim', 64)
-                kl_weight = model_config.get('kl_weight', 0.001)
-                recon_loss_type = model_config.get('recon_loss_type', 'mse')
-                dropout = model_config.get('dropout', 0.2)
-                im_embd = model_config.get('im_embd', 128)
-                
-                model = VAETrajGenerator(
-                    latent_dim=latent_dim,
-                    kl_weight=kl_weight,
-                    recon_loss_type=recon_loss_type,
-                    dropout=dropout,
-                    im_embd=im_embd
-                )
-                
-                data, state_dim, action_dim, seq_length = expert_trajectories["data"], expert_trajectories["state_dim"], expert_trajectories["action_dim"], expert_trajectories["traj_length"]
-                model.build_model(state_dim, action_dim, seq_length)
+        # 创建初始模型作为模板
+        template_model = None
+        if model_type == 'AutoencoderModel':
+            encoder_type = model_config.get('encoder_type', 'lstm')
+            latent_dim = model_config.get('latent_dim', 32)
+            kl_weight = model_config.get('kl_weight', 0.001)
+            dropout_rate = model_config.get('dropout_rate', 0.2)
             
-            # 为模型添加唯一ID
-            model.id = f"{model_type}_{i}"
-            models.append(model)
+            template_model = AutoencoderTrainer(
+                encoder_type=encoder_type,
+                latent_dim=latent_dim,
+                kl_weight=kl_weight,
+                dropout_rate=dropout_rate
+            )
+            
+            data, state_dim, action_dim, seq_length = expert_trajectories["data"], expert_trajectories["state_dim"], expert_trajectories["action_dim"], expert_trajectories["traj_length"]
+            template_model.build_model(state_dim, action_dim, seq_length)
+            
+        elif model_type == 'TransformerModel':
+            d_model = model_config.get('d_model', 128)
+            num_heads = model_config.get('num_heads', 4)
+            num_layers = model_config.get('num_layers', 3)
+            max_seq_len = model_config.get('max_seq_len', 100)
+            dropout_rate = model_config.get('dropout_rate', 0.2)
+            
+            template_model = TransformerTrainer(
+                d_model=d_model,
+                num_heads=num_heads,
+                num_layers=num_layers,
+                max_seq_len=max_seq_len,
+                dropout_rate=dropout_rate
+            )
+            
+            data, state_dim, action_dim = expert_trajectories["data"], expert_trajectories["state_dim"], expert_trajectories["action_dim"]
+            template_model.build_model(state_dim, action_dim)
+            
+        elif model_type == 'DiffusionTrajGenerator':
+            diffusion_steps = model_config.get('diffusion_steps', 1000)
+            noise_schedule = model_config.get('noise_schedule', 'cosine')
+            dropout = model_config.get('dropout', 0.2)
+            im_embd = model_config.get('im_embd', 128)
+            
+            template_model = DiffusionTrajGenerator(
+                diffusion_steps=diffusion_steps,
+                noise_schedule=noise_schedule,
+                dropout=dropout,
+                im_embd=im_embd
+            )
+            
+            data, state_dim, action_dim = expert_trajectories["data"], expert_trajectories["state_dim"], expert_trajectories["action_dim"]
+            template_model.build_model(state_dim)
+            
+        elif model_type == 'VAETrajGenerator':
+            latent_dim = model_config.get('latent_dim', 64)
+            kl_weight = model_config.get('kl_weight', 0.001)
+            recon_loss_type = model_config.get('recon_loss_type', 'mse')
+            dropout = model_config.get('dropout', 0.2)
+            im_embd = model_config.get('im_embd', 128)
+            
+            template_model = VAETrajGenerator(
+                latent_dim=latent_dim,
+                kl_weight=kl_weight,
+                recon_loss_type=recon_loss_type,
+                dropout=dropout,
+                im_embd=im_embd
+            )
+            
+            data, state_dim, action_dim, seq_length = expert_trajectories["data"], expert_trajectories["state_dim"], expert_trajectories["action_dim"], expert_trajectories["traj_length"]
+            template_model.build_model(state_dim, action_dim, seq_length)
         
-        # 初始化种群
-        population = evolutionary_learner.initialize_population(models[0], seed=42)
+        # 为模板模型添加唯一ID
+        template_model.id = f"{model_type}_template"
         
-        # 替换种群中的模型
-        for i in range(min(len(population), len(models))):
-            population[i] = models[i]
+        # 使用模板模型初始化种群
+        population = evolutionary_learner.initialize_population(template_model, seed=42)
         
         # 训练种群
         training_result = evolutionary_learner.train_population(expert_trajectories)
