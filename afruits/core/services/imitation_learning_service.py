@@ -327,7 +327,7 @@ class ImitationLearningService:
         
         return model, metrics
     
-    def _train_evolutionary(self, model_type: str, expert_trajectories: Dict, model_config: Dict) -> Tuple[Any, Dict]:
+    def _train_evolutionary(self, model_type: str, expert_trajectories: Dict, model_config: Dict, eval_trajectories: Dict) -> Tuple[Any, Dict]:
         """
         Transformer模型进化学习方法
         
@@ -376,7 +376,8 @@ class ImitationLearningService:
             num_heads=num_heads,
             num_layers=num_layers,
             max_seq_len=max_seq_len,
-            dropout_rate=dropout_rate
+            dropout_rate=dropout_rate,
+            eval_trajectories=eval_trajectories
         )
         
         # 获取数据维度
@@ -400,14 +401,12 @@ class ImitationLearningService:
         
         # 创建评估环境
         self.logger.info("创建评估环境")
-        eval_env = self._create_eval_env(model_config)
         
         # 运行进化
         self.logger.info(f"开始进化过程，最大代数: {max_generations}")
         evolution_result = evolutionary_learner.run_evolution(
             max_generations=max_generations,
             fitness_threshold=fitness_threshold,
-            eval_env=eval_env
         )
         
         # 获取最佳模型
@@ -627,28 +626,6 @@ class ImitationLearningService:
             raise ValueError(f"不支持的模型类型: {model_type}")
         
         return model
-    
-    def _create_eval_env(self, model_config: Dict) -> Any:
-        """创建评估环境"""
-        # 这里应该根据实际需求创建评估环境
-        # 简化示例：返回一个简单的评估环境
-        class SimpleEvalEnv:
-            def __init__(self):
-                self.state = None
-            
-            def reset(self):
-                self.state = np.zeros(model_config.get('state_dim', 32))
-                return self.state
-            
-            def step(self, action):
-                # 简单的状态转移
-                self.state = np.random.randn(model_config.get('state_dim', 32)) * 0.1 + self.state
-                reward = np.random.rand()
-                done = np.random.rand() > 0.95
-                info = {}
-                return self.state, reward, done, info
-        
-        return SimpleEvalEnv()
     
     def generate_trajectory(self, model_id: str, context: Dict = None, config: Dict = None) -> Dict:
         """

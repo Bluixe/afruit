@@ -135,7 +135,7 @@ class EvolutionaryLearner:
         
         return self.population
     
-    def evaluate_fitness(self, population: List, eval_env: object) -> Dict:
+    def evaluate_fitness(self, population: List) -> Dict:
         """
         适应度评估方法
         
@@ -162,7 +162,7 @@ class EvolutionaryLearner:
             # 评估策略
             try:
                 # 使用环境评估策略
-                score = self._evaluate_transformer(policy, eval_env)
+                score = self._evaluate_transformer(policy)
                 
                 # 存储适应度分数和元数据
                 metadata = {
@@ -193,49 +193,30 @@ class EvolutionaryLearner:
         
         return fitness_scores
     
-    def _evaluate_transformer(self, policy, eval_env, num_episodes=5):
-        """评估Transformer模型的适应度"""
-        total_reward = 0.0
+    def _evaluate_transformer(self, policy, num_episodes=5):
+        """评估Transformer模型的适应度
         
-        for _ in range(num_episodes):
-            # 重置环境
-            obs = eval_env.reset()
-            done = False
-            episode_reward = 0.0
-            
-            while not done:
-                # 使用Transformer模型预测动作
-                # 确保输入是正确的形状
-                if isinstance(obs, np.ndarray):
-                    obs_tensor = torch.FloatTensor(obs).to(self.device)
-                else:
-                    obs_tensor = obs.to(self.device)
-                
-                # 根据输入维度调整
-                if len(obs_tensor.shape) == 1:  # 如果是一维向量，添加批次维度
-                    obs_tensor = obs_tensor.unsqueeze(0)
-                
-                # 创建一个虚拟的动作序列（全零）
-                batch_size = obs_tensor.shape[0]
-                dummy_actions = torch.zeros(batch_size, 1, dtype=torch.long).to(self.device)
-                
-                # 创建批次
-                batch = [obs_tensor, dummy_actions]
-                
-                # 使用模型预测
-                with torch.no_grad():
-                    outputs = policy.model(batch)
-                    action_probs = torch.softmax(outputs[:, -1, :], dim=-1)
-                    action = torch.argmax(action_probs, dim=-1).item()
-                
-                # 执行动作
-                obs, reward, done, info = eval_env.step(action)
-                episode_reward += reward
-            
-            total_reward += episode_reward
+        使用self.data_loader进行离线评估，计算模型在数据集上的性能
         
-        # 返回平均奖励
-        return total_reward / num_episodes
+        参数:
+            policy (TransformerTrainer): 要评估的Transformer模型
+            num_episodes (int): 评估轮数，默认为5
+            
+        返回值:
+            float: 评估得分（负损失值，越高越好）
+        """
+        # 检查是否有数据加载器
+        if not hasattr(self, 'data_loader') or self.data_loader is None:
+            raise ValueError("数据加载器未初始化，请先调用load_sequences方法")
+        
+        # 使用TransformerTrainer的evaluate方法进行评估
+        criterion = nn.CrossEntropyLoss()
+        loss = policy.evaluate(self.data_loader, criterion)
+        
+        # 将损失转换为适应度分数（负损失，越高越好）
+        fitness_score = -loss
+        
+        return fitness_score
     
     def select_parents(self, fitness_scores: Dict, num_parents: int) -> List:
         """
@@ -441,7 +422,7 @@ class EvolutionaryLearner:
                 if isinstance(module, nn.Dropout):
                     module.p = policy.dropout_rate
     
-    def run_evolution(self, max_generations: int, fitness_threshold: float, eval_env: object) -> Dict:
+    def run_evolution(self, max_generations: int, fitness_threshold: float) -> Dict:
         """
         进化迭代方法
         
@@ -479,7 +460,7 @@ class EvolutionaryLearner:
             print(f"\n===== 第 {self.generation} 代进化 =====")
             
             # 评估当前种群
-            fitness_scores = self.evaluate_fitness(self.population, eval_env)
+            fitness_scores = self.evaluate_fitness(self.population)
             
             # 计算统计信息
             scores = [score for score, _ in fitness_scores.values()]
@@ -637,6 +618,7 @@ class EvolutionaryLearner:
         dataloader_util = DataLoaderUtil()
         data = dataloader_util.load_expert_data(raw_data, batch_size=batch_size)
         data_loader = data['dataloader']
+        self.data_loader = data_loader
         
         return data_loader
     
