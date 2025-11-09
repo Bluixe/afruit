@@ -327,7 +327,7 @@ class ImitationLearningService:
         
         return model, metrics
     
-    def _train_evolutionary(self, model_type: str, expert_trajectories: Dict, model_config: Dict, eval_trajectories: Dict) -> Tuple[Any, Dict]:
+    def _train_evolutionary(self, model_type: str, expert_trajectories: Dict, model_config: Dict) -> Tuple[Any, Dict]:
         """
         Transformer模型进化学习方法
         
@@ -377,7 +377,6 @@ class ImitationLearningService:
             num_layers=num_layers,
             max_seq_len=max_seq_len,
             dropout_rate=dropout_rate,
-            eval_trajectories=eval_trajectories
         )
         
         # 获取数据维度
