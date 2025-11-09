@@ -547,7 +547,7 @@ class AutoencoderTrainer:
         参数:
             save_path (str): 保存路径，应以.pt结尾
         """
-        if self.encoder is None or self.decoder is None:
+        if self.model is None:
             raise ValueError("模型尚未构建，请先调用build_model")
 
         if save_path is None:

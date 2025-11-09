@@ -891,7 +891,7 @@ class ImitationLearningService:
                 # 使用Transformer模型预测
                 with torch.no_grad():
                     result = model.predict(input_seq)
-                return result.get('trajectory', None)
+                return result
             else:
                 raise ValueError(f"不支持的模型类型: {type(model).__name__}")
             
