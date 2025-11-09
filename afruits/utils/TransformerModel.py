@@ -287,6 +287,16 @@ class TransformerTrainer:
             device=self.device
         ).to(self.device)
 
+        self.config_to_save = {
+            'd_model': self.d_model,
+            'num_heads': self.num_heads,
+            'num_layers': self.num_layers,
+            'max_seq_len': self.max_seq_len,
+            'dropout_rate': self.dropout_rate,
+            'lr_weight': self.lr_weight,
+        }
+
+
     def build_model(self, input_dim, output_dim):
         """
         构建模型
@@ -298,6 +308,10 @@ class TransformerTrainer:
         返回:
             TransformerTrainer: 自身实例
         """
+        self.config_to_save.update({
+            'input_dim': input_dim,
+            'output_dim': output_dim,
+        })
         self.input_dim = input_dim
         self.action_dim = output_dim
         
