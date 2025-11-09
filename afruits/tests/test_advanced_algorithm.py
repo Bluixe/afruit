@@ -352,6 +352,6 @@ class TestAdvancedAlgorithm(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    test_suite = unittest.TestLoader().loadTestsFromTestCase(TestBasicAlgorithm)
+    test_suite = unittest.TestLoader().loadTestsFromTestCase(TestAdvancedAlgorithm)
     runner = EnhancedTestRunner(verbosity=2)
     runner.run(test_suite)
