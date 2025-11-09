@@ -812,7 +812,7 @@ class ImitationLearningService:
             if isinstance(model, AutoencoderTrainer):
                 # 使用自编码器模型编码
                 with torch.no_grad():
-                    encoded = model.encode(input_data)
+                    encoded = model.model.encode(input_data)
                 return encoded
             else:
                 raise ValueError(f"不支持的模型类型: {type(model).__name__}")
