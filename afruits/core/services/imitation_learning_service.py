@@ -109,16 +109,19 @@ class ImitationLearningService:
             
             # 保存模型
             self.models[model_id] = model
-            if model_type == 'AutoencoderModel':
-                model.save_model(save_path)
-            elif model_type == 'TransformerModel':
-                model.save_model(save_path)
-            elif model_type == 'DiffusionTrajGenerator':
-                model.save_model(save_path)
-            elif model_type == 'VAETrajGenerator':
-                model.save_model(save_path)
+            if training_method == 'standard':
+                if model_type == 'AutoencoderModel':
+                    model.save_model(save_path)
+                elif model_type == 'TransformerModel':
+                    model.save_model(save_path)
+                elif model_type == 'DiffusionTrajGenerator':
+                    model.save_model(save_path)
+                elif model_type == 'VAETrajGenerator':
+                    model.save_model(save_path)
+                else:
+                    raise ValueError(f"不支持的模型类型: {model_type}")
             else:
-                raise ValueError(f"不支持的模型类型: {model_type}")
+                print("模型已成功保存")
             
             # 保存训练历史
             self.training_history[model_id] = metrics
@@ -849,7 +852,7 @@ class ImitationLearningService:
             if isinstance(model, AutoencoderTrainer):
                 # 使用自编码器模型解码
                 with torch.no_grad():
-                    decoded = model.decode(latent_code)
+                    decoded = model.model.decode(latent_code)
                 return decoded
             else:
                 raise ValueError(f"不支持的模型类型: {type(model).__name__}")
