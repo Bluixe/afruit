@@ -9,6 +9,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # 导入API
 from afruits.core.api import AlgorithmAPI
+from afruits.utils.enhanced_test_runner import EnhancedTestRunner
 
 class TestAdvancedAlgorithm(unittest.TestCase):
     """
@@ -351,4 +352,6 @@ class TestAdvancedAlgorithm(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    unittest.main()
+    test_suite = unittest.TestLoader().loadTestsFromTestCase(TestBasicAlgorithm)
+    runner = EnhancedTestRunner(verbosity=2)
+    runner.run(test_suite)
