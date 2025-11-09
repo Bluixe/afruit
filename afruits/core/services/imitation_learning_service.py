@@ -328,16 +328,30 @@ class ImitationLearningService:
         return model, metrics
     
     def _train_evolutionary(self, model_type: str, expert_trajectories: Dict, model_config: Dict) -> Tuple[Any, Dict]:
-        """进化学习方法"""
-        self.logger.info(f"使用进化学习方法训练 {model_type} 模型")
+        """
+        Transformer模型进化学习方法
+        
+        参数:
+            model_type (str): 模型类型，必须为'TransformerModel'
+            expert_trajectories (Dict): 专家轨迹数据
+            model_config (Dict): 模型配置
+            
+        返回:
+            Tuple[Any, Dict]: (最佳模型, 训练指标)
+        """
+        # 确保模型类型为TransformerModel
+        if model_type != 'TransformerModel':
+            raise ValueError("进化学习器现在只支持TransformerModel类型")
+            
+        self.logger.info("使用进化学习方法训练Transformer模型")
         
         # 提取进化学习参数
-        population_size = model_config.get('population_size', 50)
+        population_size = model_config.get('population_size', 10)
         mutation_rate = model_config.get('mutation_rate', 0.15)
         crossover_rate = model_config.get('crossover_rate', 0.7)
         selection_method = model_config.get('selection_method', 'tournament')
         elitism_ratio = model_config.get('elitism_ratio', 0.1)
-        max_generations = model_config.get('max_generations', 50)
+        max_generations = model_config.get('max_generations', 20)
         fitness_threshold = model_config.get('fitness_threshold', 0.95)
         
         # 创建进化学习器
@@ -347,93 +361,49 @@ class ImitationLearningService:
             crossover_rate=crossover_rate,
             selection_method=selection_method,
             elitism_ratio=elitism_ratio,
-            model_type=model_type,
             model_config=model_config
         )
         
-        # 创建初始模型作为模板
-        template_model = None
-        if model_type == 'AutoencoderModel':
-            encoder_type = model_config.get('encoder_type', 'lstm')
-            latent_dim = model_config.get('latent_dim', 32)
-            kl_weight = model_config.get('kl_weight', 0.001)
-            dropout_rate = model_config.get('dropout_rate', 0.2)
-            
-            template_model = AutoencoderTrainer(
-                encoder_type=encoder_type,
-                latent_dim=latent_dim,
-                kl_weight=kl_weight,
-                dropout_rate=dropout_rate
-            )
-            
-            data, state_dim, action_dim, seq_length = expert_trajectories["data"], expert_trajectories["state_dim"], expert_trajectories["action_dim"], expert_trajectories["traj_length"]
-            template_model.build_model(state_dim, action_dim, seq_length)
-            
-        elif model_type == 'TransformerModel':
-            d_model = model_config.get('d_model', 128)
-            num_heads = model_config.get('num_heads', 4)
-            num_layers = model_config.get('num_layers', 3)
-            max_seq_len = model_config.get('max_seq_len', 100)
-            dropout_rate = model_config.get('dropout_rate', 0.2)
-            
-            template_model = TransformerTrainer(
-                d_model=d_model,
-                num_heads=num_heads,
-                num_layers=num_layers,
-                max_seq_len=max_seq_len,
-                dropout_rate=dropout_rate
-            )
-            
-            data, state_dim, action_dim = expert_trajectories["data"], expert_trajectories["state_dim"], expert_trajectories["action_dim"]
-            template_model.build_model(state_dim, action_dim)
-            
-        elif model_type == 'DiffusionTrajGenerator':
-            diffusion_steps = model_config.get('diffusion_steps', 1000)
-            noise_schedule = model_config.get('noise_schedule', 'cosine')
-            dropout = model_config.get('dropout', 0.2)
-            im_embd = model_config.get('im_embd', 128)
-            
-            template_model = DiffusionTrajGenerator(
-                diffusion_steps=diffusion_steps,
-                noise_schedule=noise_schedule,
-                dropout=dropout,
-                im_embd=im_embd
-            )
-            
-            data, state_dim, action_dim = expert_trajectories["data"], expert_trajectories["state_dim"], expert_trajectories["action_dim"]
-            template_model.build_model(state_dim)
-            
-        elif model_type == 'VAETrajGenerator':
-            latent_dim = model_config.get('latent_dim', 64)
-            kl_weight = model_config.get('kl_weight', 0.001)
-            recon_loss_type = model_config.get('recon_loss_type', 'mse')
-            dropout = model_config.get('dropout', 0.2)
-            im_embd = model_config.get('im_embd', 128)
-            
-            template_model = VAETrajGenerator(
-                latent_dim=latent_dim,
-                kl_weight=kl_weight,
-                recon_loss_type=recon_loss_type,
-                dropout=dropout,
-                im_embd=im_embd
-            )
-            
-            data, state_dim, action_dim, seq_length = expert_trajectories["data"], expert_trajectories["state_dim"], expert_trajectories["action_dim"], expert_trajectories["traj_length"]
-            template_model.build_model(state_dim, action_dim, seq_length)
+        # 创建Transformer模板模型
+        d_model = model_config.get('d_model', 128)
+        num_heads = model_config.get('num_heads', 4)
+        num_layers = model_config.get('num_layers', 3)
+        max_seq_len = model_config.get('max_seq_len', 100)
+        dropout_rate = model_config.get('dropout_rate', 0.2)
+        
+        template_model = TransformerTrainer(
+            d_model=d_model,
+            num_heads=num_heads,
+            num_layers=num_layers,
+            max_seq_len=max_seq_len,
+            dropout_rate=dropout_rate
+        )
+        
+        # 获取数据维度
+        data, state_dim, action_dim = expert_trajectories["data"], expert_trajectories["state_dim"], expert_trajectories["action_dim"]
+        
+        # 构建模型
+        template_model.build_model(state_dim, action_dim)
         
         # 为模板模型添加唯一ID
-        template_model.id = f"{model_type}_template"
+        template_model.id = "transformer_template"
         
         # 使用模板模型初始化种群
+        self.logger.info(f"初始化Transformer种群，种群大小: {population_size}")
         population = evolutionary_learner.initialize_population(template_model, seed=42)
         
         # 训练种群
-        training_result = evolutionary_learner.train_population(expert_trajectories)
+        self.logger.info("开始训练Transformer种群")
+        epochs = model_config.get('epochs', 5)  # 每个模型的训练轮次
+        batch_size = model_config.get('batch_size', 32)
+        training_result = evolutionary_learner.train_population(expert_trajectories, epochs=epochs, batch_size=batch_size)
         
         # 创建评估环境
+        self.logger.info("创建评估环境")
         eval_env = self._create_eval_env(model_config)
         
         # 运行进化
+        self.logger.info(f"开始进化过程，最大代数: {max_generations}")
         evolution_result = evolutionary_learner.run_evolution(
             max_generations=max_generations,
             fitness_threshold=fitness_threshold,
@@ -444,20 +414,26 @@ class ImitationLearningService:
         best_model = evolution_result.get('best_policy')
         
         # 提取训练指标
+        generation_stats = evolution_result.get('generation_stats', [])
+        mean_fitness = [stat.get('mean_fitness') for stat in generation_stats]
+        max_fitness = [stat.get('max_fitness') for stat in generation_stats]
+        min_fitness = [stat.get('min_fitness') for stat in generation_stats]
+        diversity = evolution_result.get('history', {}).get('diversity', [])
+        
         metrics = {
-            'mean_fitness': evolution_result.get('mean_fitness', []),
-            'max_fitness': evolution_result.get('max_fitness', []),
-            'min_fitness': evolution_result.get('min_fitness', []),
-            'diversity': evolution_result.get('diversity', []),
-            'final_mean_fitness': evolution_result.get('mean_fitness', [-1])[-1] if evolution_result.get('mean_fitness') else None,
-            'final_max_fitness': evolution_result.get('max_fitness', [-1])[-1] if evolution_result.get('max_fitness') else None,
-            'generations': evolution_result.get('generations', 0)
+            'mean_fitness': mean_fitness,
+            'max_fitness': max_fitness,
+            'min_fitness': min_fitness,
+            'diversity': diversity,
+            'final_mean_fitness': mean_fitness[-1] if mean_fitness else None,
+            'final_max_fitness': max_fitness[-1] if max_fitness else None,
+            'generations': len(generation_stats)
         }
         
         self.logger.info(f"进化学习完成，最终最大适应度: {metrics['final_max_fitness']}, 平均适应度: {metrics['final_mean_fitness']}, 代数: {metrics['generations']}")
         
         # 保存进化学习器
-        learner_id = f"evolutionary_{int(time.time())}"
+        learner_id = f"transformer_evolutionary_{int(time.time())}"
         self.training_methods[learner_id] = evolutionary_learner
         
         return best_model, metrics
