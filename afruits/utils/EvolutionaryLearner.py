@@ -640,7 +640,7 @@ class EvolutionaryLearner:
         
         return history
     
-    def train_population(self, raw_trajectories: Dict, epochs: int = 10, batch_size: int = 64) -> Dict:
+    def train_population(self, raw_trajectories: Dict, data_loader, epochs: int = 10, batch_size: int = 64) -> Dict:
         """
         训练Transformer种群
         

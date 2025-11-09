@@ -353,6 +353,7 @@ class ImitationLearningService:
         elitism_ratio = model_config.get('elitism_ratio', 0.1)
         max_generations = model_config.get('max_generations', 20)
         fitness_threshold = model_config.get('fitness_threshold', 0.95)
+        batch_size = model_config.get('batch_size', 32)
         
         # 创建进化学习器
         evolutionary_learner = EvolutionaryLearner(
@@ -383,6 +384,7 @@ class ImitationLearningService:
         data, state_dim, action_dim = expert_trajectories["data"], expert_trajectories["state_dim"], expert_trajectories["action_dim"]
         
         # 构建模型
+        data_loader = evolutionary_learner.load_sequences(data, batch_size=batch_size)
         template_model.build_model(state_dim, action_dim)
         
         # 为模板模型添加唯一ID
@@ -396,7 +398,7 @@ class ImitationLearningService:
         self.logger.info("开始训练Transformer种群")
         epochs = model_config.get('epochs', 5)  # 每个模型的训练轮次
         batch_size = model_config.get('batch_size', 32)
-        training_result = evolutionary_learner.train_population(expert_trajectories, epochs=epochs, batch_size=batch_size)
+        training_result = evolutionary_learner.train_population(expert_trajectories, data_loader, epochs=epochs, batch_size=batch_size)
         
         # 创建评估环境
         self.logger.info("创建评估环境")
