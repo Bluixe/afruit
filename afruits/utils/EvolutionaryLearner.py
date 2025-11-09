@@ -178,9 +178,10 @@ class EvolutionaryLearner:
                 fitness_scores[policy.id] = (score, metadata)
                 
             except Exception as e:
-                print(f"评估策略 {policy.id} 时出错: {str(e)}")
-                # 分配一个很低的适应度分数
-                fitness_scores[policy.id] = (-1000, {'error': str(e)})
+                raise e
+                # print(f"评估策略 {policy.id} 时出错: {str(e)}")
+                # # 分配一个很低的适应度分数
+                # fitness_scores[policy.id] = (-1000, {'error': str(e)})
         
         # 更新适应度字典
         self.fitness_scores = fitness_scores
