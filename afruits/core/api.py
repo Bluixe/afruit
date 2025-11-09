@@ -496,3 +496,31 @@ class AlgorithmAPI:
         except Exception as e:
             self.logger.error(f"轨迹生成器训练失败: {str(e)}")
             raise
+
+    def train_advanced_algorithm(self, training_data: Dict, model_config: Dict) -> Dict:
+        """
+        进化学习/增量学习/小样本微调
+        
+        参数:
+            training_data (Dict): 训练数据
+            model_config (Dict): 模型配置
+            
+        返回:
+            Dict: 训练结果，包含模型和训练指标
+        """
+        self.logger.info("开始训练")
+        
+        try:
+            # 确保model_config中包含training_method
+            if 'training_method' not in model_config:
+                model_config['training_method'] = 'standard'
+                
+            # 使用模仿学习服务训练模型
+            result = self.imitation_learning_service.train_model(training_data, model_config)
+            
+            self.logger.info("轨迹生成器训练完成")
+            return result
+            
+        except Exception as e:
+            self.logger.error(f"轨迹生成器训练失败: {str(e)}")
+            raise

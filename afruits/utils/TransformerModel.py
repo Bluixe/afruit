@@ -3,6 +3,8 @@ import torch.nn as nn
 import transformers
 from transformers import GPT2Config, GPT2Model
 import numpy as np
+import json
+import os
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
@@ -301,7 +303,7 @@ class TransformerTrainer:
         
         self.model.build_model(input_dim, output_dim)
         
-        return self
+        return self.model
 
     def load_sequences(self, raw_data, batch_size=32):
         """
@@ -314,8 +316,6 @@ class TransformerTrainer:
         返回:
             DataLoader: 数据加载器
         """
-        # 这里可以实现数据加载逻辑，返回DataLoader
-        # 由于这是一个模型类，实际上数据加载可能在外部完成
         dataloader_util = DataLoaderUtil()
         data = dataloader_util.load_expert_data(raw_data, batch_size=batch_size)
         data_loader = data['dataloader']
@@ -475,3 +475,79 @@ class TransformerTrainer:
             action_probs = torch.softmax(pred_actions, dim=-1)
             
             return action_probs
+        
+    def save_model(self, save_path = None) -> None:
+        """
+        保存模型参数和配置
+        
+        参数:
+            save_path (str): 保存路径，应以.pt结尾
+        """
+        if self.encoder is None or self.decoder is None:
+            raise ValueError("模型尚未构建，请先调用build_model")
+
+        if save_path is None:
+            # 默认保存路径
+            save_path = f"models/transformer.pt"
+        
+        # 确保目录存在
+        os.makedirs(os.path.dirname(os.path.abspath(save_path)), exist_ok=True)
+        
+        # 保存模型参数和配置
+        model_state = {
+            'state_dict': self.model.state_dict(),
+            'config': {k:v for k,v in self.config_to_save.items()}
+        }
+        
+        # 保存模型
+        torch.save(model_state, save_path)
+        
+        config_path = os.path.splitext(save_path)[0] + '_config.json'
+        with open(config_path, 'w', encoding='utf-8') as f:
+            json.dump(model_state['config'], f, ensure_ascii=False, indent=4)
+            
+        print(f"模型已保存至: {save_path}")
+        print(f"配置已保存至: {config_path}")
+
+    @staticmethod
+    def load_model(load_path, device: torch.device = None) -> 'TransformerModel':
+        """
+        静态方法：加载模型参数和配置，返回TransformerModel实例
+        
+        参数:
+            load_path (str): 模型加载路径
+            device (torch.device, optional): 计算设备
+            
+        返回值:
+            TransformerModel实例
+        """
+        if device is None:
+            device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        
+        if load_path is None:
+            load_path = f"models/transformer.pt"
+        
+        # 加载模型状态
+        checkpoint = torch.load(load_path, map_location=device)
+        config = checkpoint['config']
+        
+        # 创建TransformerModel实例
+        model_trainer = TransformerTrainer(
+            d_model=config['d_model'],
+            num_heads=config['num_heads'],
+            num_layers=config['num_layers'],
+            max_seq_len=config['max_seq_len'],
+            dropout_rate=config['dropout_rate'],
+            lr_weight=config['lr_weight'],
+            device=device
+        )
+        
+        # 构建模型
+        model_trainer.build_model(config['input_dim'], config['output_dim'])
+        
+        # 加载模型参数
+        model_trainer.model.load_state_dict(checkpoint['state_dict'])
+        
+        print(f"成功加载模型: {load_path}")
+        
+        return model_trainer

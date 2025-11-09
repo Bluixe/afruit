@@ -7,6 +7,7 @@ from typing import Dict, List, Tuple, Union, Optional, Any
 import os
 import time
 from afruits.utils.DataLoader import DataLoaderUtil
+import json
 
 class DiffusionTrajGenerator:
     """
@@ -24,7 +25,6 @@ class DiffusionTrajGenerator:
     def __init__(self,
                  diffusion_steps: int = 1000,
                  noise_schedule: str = "cosine",
-                 seq_length: int = 120,
                  dropout: float = 0.2,
                  im_embd: int = 128):
         """
@@ -40,14 +40,12 @@ class DiffusionTrajGenerator:
         # 参数有效性检查
         assert 10 <= diffusion_steps <= 2000, "diffusion_steps必须在10-2000范围内"
         assert noise_schedule in ["linear", "cosine"], "noise_schedule必须是'linear'或'cosine'"
-        assert 60 <= seq_length <= 300, "seq_length必须在60-300范围内"
         assert 0.0 <= dropout <= 0.5, "dropout必须在0.0-0.5范围内"
         
         # 初始化参数
         self.diffusion_steps = diffusion_steps
         self.noise_schedule = noise_schedule
         self.physics_constraints = {}
-        self.seq_length = seq_length
         self.dropout = dropout
         self.im_embd = im_embd
         
@@ -66,6 +64,13 @@ class DiffusionTrajGenerator:
         self.loss_fn = nn.MSELoss()
 
         self.dataloader_util = DataLoaderUtil()
+
+        self.config_to_save = {
+            'diffusion_steps': self.diffusion_steps,
+            'noise_schedule': self.noise_schedule,
+            'dropout': self.dropout,
+            'im_embd': self.im_embd
+        }
         
     def _get_noise_schedule(self) -> np.ndarray:
         """
@@ -105,7 +110,7 @@ class DiffusionTrajGenerator:
         data_loader = data['dataloader']
         return data_loader
     
-    def build_network(self, state_dim, cond_dim: int = 0) -> nn.Module:
+    def build_model(self, state_dim, cond_dim: int = 0) -> nn.Module:
         """
         构建网络
         
@@ -120,6 +125,11 @@ class DiffusionTrajGenerator:
         if isinstance(state_dim, tuple):
             assert len(state_dim) == 1, "state_dim元组长度必须为1"
             state_dim = state_dim[0]
+
+        self.config_to_save.update({
+            'state_dim': state_dim,
+            'cond_dim': cond_dim,
+        })
 
         # 构建U-Net结构的扩散模型
         # 完全重新设计的 DiffusionUNet 模型
@@ -210,7 +220,7 @@ class DiffusionTrajGenerator:
         self.model = model
         return model
     
-    def train(self, dataloader: DataLoader, epochs: int = 100) -> Dict:
+    def train(self, dataloader: DataLoader, epochs: int = 100, learning_rate = 1e-4) -> Dict:
         """
         训练过程
         
@@ -222,7 +232,7 @@ class DiffusionTrajGenerator:
             训练统计 (Dict)
         """
         if self.model is None:
-            raise ValueError("请先调用build_network构建模型")
+            raise ValueError("请先调用build_model构建模型")
         
         self.model.train()
         losses = []
@@ -318,7 +328,7 @@ class DiffusionTrajGenerator:
             生成结果 (Dict)
         """
         if self.model is None:
-            raise ValueError("请先调用build_network构建模型")
+            raise ValueError("请先调用build_model构建模型")
         
         self.model.eval()
         input_shape = next(self.model.parameters()).shape
@@ -369,6 +379,87 @@ class DiffusionTrajGenerator:
         return {
             'trajectories': x.cpu().numpy(),
         }
+    
+    def save_model(self, save_path = None) -> None:
+        """
+        保存模型参数和配置
+        
+        参数:
+            save_path (str): 保存路径，应以.pt结尾
+        """
+        if self.model is None:
+            raise ValueError("模型尚未构建，请先调用build_model")
+
+        if save_path is None:
+            # 默认保存路径
+            save_path = f"models/diffusion_traj_generator.pt"
+        
+        # 确保目录存在
+        os.makedirs(os.path.dirname(os.path.abspath(save_path)), exist_ok=True)
+        
+        # 保存模型参数和配置
+        model_state = {
+            'encoder_state_dict': self.model.state_dict(),
+            'optimizer_state_dict': self.optimizer.state_dict() if self.optimizer else None,
+            'scheduler_state_dict': self.scheduler.state_dict() if self.scheduler else None,
+            'config': {k:v for k,v in self.config_to_save.items()}
+        }
+        # 保存模型
+        torch.save(model_state, save_path)
+        
+        config_path = os.path.splitext(save_path)[0] + '_config.json'
+        with open(config_path, 'w', encoding='utf-8') as f:
+            json.dump(model_state['config'], f, ensure_ascii=False, indent=4)
+            
+        print(f"模型已保存至: {save_path}")
+        print(f"配置已保存至: {config_path}")
+
+    # 写一个静态函数load_model，从而构建模型并加载参数
+    @staticmethod
+    def load_model(load_path) -> 'DiffusionTrajGenerator':
+        """
+        加载模型参数和配置
+        
+        参数:
+            load_path (str): 加载路径，应以.pt结尾
+            
+        返回:
+            DiffusionTrajGenerator实例
+        """
+        if load_path is None:
+            load_path = f"models/diffusion_traj_generator.pt"
+        if not os.path.isfile(load_path):
+            raise ValueError(f"指定的模型文件不存在: {load_path}")
+        
+        # 加载模型状态
+        model_state = torch.load(load_path, map_location=torch.device('cpu'))
+        config = model_state['config']
+        
+        # 创建DiffusionTrajGenerator实例
+        generator = DiffusionTrajGenerator(
+            diffusion_steps=config.get('diffusion_steps', 1000),
+            noise_schedule=config.get('noise_schedule', 'cosine'),
+            dropout=config.get('dropout', 0.2),
+            im_embd=config.get('im_embd', 128)
+        )
+        
+        # 构建模型
+        state_dim = config.get('state_dim')
+        cond_dim = config.get('cond_dim', 0)
+        generator.build_model(state_dim=state_dim, cond_dim=cond_dim)
+        
+        # 加载模型参数
+        generator.model.load_state_dict(model_state['encoder_state_dict'])
+        
+        # 加载优化器和调度器状态（如果存在）
+        if generator.optimizer and model_state['optimizer_state_dict']:
+            generator.optimizer.load_state_dict(model_state['optimizer_state_dict'])
+        if generator.scheduler and model_state['scheduler_state_dict']:
+            generator.scheduler.load_state_dict(model_state['scheduler_state_dict'])
+        
+        print(f"模型已从 {load_path} 加载")
+        return generator
+
     
     def _check_physics_validity(self, data: Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]) -> torch.Tensor:
         """

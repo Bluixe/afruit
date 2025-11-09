@@ -8,7 +8,7 @@ import time
 import copy
 
 # 导入轨迹建模与生成模型
-from utils.AutoencoderModel import AutoencoderModel
+from utils.AutoencoderModel import AutoencoderTrainer
 from utils.TransformerModel import TransformerTrainer
 from utils.DiffusionTrajGenerator import DiffusionTrajGenerator
 from utils.VAETrajGenerator import VAETrajGenerator
@@ -73,6 +73,7 @@ class ImitationLearningService:
         
         # 获取训练方法
         training_method = model_config.get('training_method', 'standard')
+        save_path = model_config.get('save_path', None)
         
         self.logger.info(f"开始训练模型: {model_id}, 类型: {model_type}, 训练方法: {training_method}")
         
@@ -108,6 +109,16 @@ class ImitationLearningService:
             
             # 保存模型
             self.models[model_id] = model
+            if model_type == 'AutoencoderModel':
+                model.save_model(save_path)
+            elif model_type == 'TransformerModel':
+                model.save_model(save_path)
+            elif model_type == 'DiffusionTrajGenerator':
+                model.save_model(save_path)
+            elif model_type == 'VAETrajGenerator':
+                model.save_model(save_path)
+            else:
+                raise ValueError(f"不支持的模型类型: {model_type}")
             
             # 保存训练历史
             self.training_history[model_id] = metrics
@@ -147,17 +158,17 @@ class ImitationLearningService:
         dropout_rate = model_config.get('dropout_rate', 0.2)
         
         # 创建自编码器模型
-        model = AutoencoderModel(
+        model = AutoencoderTrainer(
             encoder_type=encoder_type,
             latent_dim=latent_dim,
             kl_weight=kl_weight,
             dropout_rate=dropout_rate
         )
 
-        data, state_dim, action_dim = expert_trajectories["data"], expert_trajectories["state_dim"], expert_trajectories["action_dim"]
+        data, state_dim, action_dim, seq_length = expert_trajectories["data"], expert_trajectories["state_dim"], expert_trajectories["action_dim"], expert_trajectories["traj_length"]
 
         # 构建模型
-        model.build_model(state_dim, action_dim)
+        model.build_model(state_dim, action_dim, seq_length)
         
         # 提取训练参数
         epochs = model_config.get('epochs', 100)
@@ -256,14 +267,8 @@ class ImitationLearningService:
         # 首先检查数据是否已经是DataLoader格式
         data, state_dim, action_dim = expert_trajectories["data"], expert_trajectories["state_dim"], expert_trajectories["action_dim"]
         
-        model.build_network(state_dim)
+        model.build_model(state_dim)
         data_loader = model.load_dataset(data, batch_size=batch_size)
-        
-        # 确保模型网络已构建
-        if not hasattr(model, 'model') or model.model is None:
-            input_dim = expert_trajectories.get('feature_dim', model_config.get('input_dim', 32))
-            cond_dim = model_config.get('cond_dim', 0)
-            model.build_network(input_dim, cond_dim)
         
         # 训练模型
         training_history = model.train(data_loader, epochs=epochs)
@@ -283,7 +288,6 @@ class ImitationLearningService:
         """VAE轨迹生成器训练方法"""
         self.logger.info("使用VAE训练方法")
         latent_dim = model_config.get('latent_dim', 64)
-        seq_length = model_config.get('seq_length', 120)
         kl_weight = model_config.get('kl_weight', 0.001)
         recon_loss_type = model_config.get('recon_loss_type', 'mse')
         dropout = model_config.get('dropout', 0.2)
@@ -447,51 +451,49 @@ class ImitationLearningService:
         self.logger.info(f"使用微调方法训练 {model_type} 模型")
         
         # 提取微调参数
-        base_model_id = model_config.get('base_model_id')
         learning_rate = model_config.get('learning_rate', 5e-5)
         epochs = model_config.get('epochs', 20)
-        freeze_layers = model_config.get('freeze_layers', [])
+        model_path = model_config.get('model_path', None)
+        batch_size = model_config.get('batch_size', 32)
+        
+        # 获取基础模型
+        if model_type == 'AutoencoderModel':
+            base_model = AutoencoderTrainer.load_model(model_path)
+        elif model_type == 'TransformerModel':
+            base_model = TransformerTrainer.load_model(model_path)
+        elif model_type == 'DiffusionTrajGenerator':
+            base_model = DiffusionTrajGenerator.load_model(model_path)
+        elif model_type == 'VAETrajGenerator':
+            base_model = VAETrajGenerator.load_model(model_path)
+        else:
+            raise ValueError(f"不支持的模型类型: {model_type}")
+
+        data, state_dim, action_dim, seq_length = expert_trajectories["data"], expert_trajectories["state_dim"], expert_trajectories["action_dim"], expert_trajectories["traj_length"]
+        
+        # 创建优化器配置
+        optimizer_config = {
+            'lr': learning_rate,
+            'type': model_config.get('optimizer_type', 'Adam'),
+            'weight_decay': model_config.get('weight_decay', 0.0)
+        }
         
         # 创建微调管理器
         fine_tune_manager = FineTuneManager(
-            learning_rate=learning_rate
+            base_model=base_model,
+            model_type=model_type,
+            optimizer_config=optimizer_config
         )
-        
-        # 获取基础模型
-        if base_model_id and base_model_id in self.models:
-            base_model = self.models[base_model_id]
-        else:
-            # 创建新模型
-            base_model = self._create_model(model_type, model_config)
-        
-        # 设置基础模型
-        fine_tune_manager.set_model(base_model)
-        
-        # 冻结指定层
-        if freeze_layers:
-            fine_tune_manager.freeze_layers(freeze_layers)
+        data_loader = fine_tune_manager.prepare_data(data, batch_size=batch_size)
         
         # 训练模型
-        training_result = fine_tune_manager.fine_tune(expert_trajectories, epochs=epochs)
+        training_result = fine_tune_manager.fine_tune(data_loader, base_model, max_epochs=epochs, learning_rate=learning_rate)
         
         # 获取微调后的模型
         fine_tuned_model = fine_tune_manager.get_model()
         
-        # 提取训练指标
-        metrics = {
-            'train_loss': training_result.get('train_loss', []),
-            'val_loss': training_result.get('val_loss', []),
-            'final_train_loss': training_result.get('train_loss', [-1])[-1] if training_result.get('train_loss') else None,
-            'final_val_loss': training_result.get('val_loss', [-1])[-1] if training_result.get('val_loss') else None
-        }
+        self.logger.info(f"微调完成")
         
-        self.logger.info(f"微调完成，最终训练损失: {metrics['final_train_loss']}, 验证损失: {metrics['final_val_loss']}")
-        
-        # 保存微调管理器
-        manager_id = f"fine_tune_{int(time.time())}"
-        self.training_methods[manager_id] = fine_tune_manager
-        
-        return fine_tuned_model, metrics
+        return fine_tuned_model, training_result
     
     def _create_model(self, model_type: str, model_config: Dict) -> Any:
         """创建模型"""
@@ -507,7 +509,7 @@ class ImitationLearningService:
             dropout_rate = model_config.get('dropout_rate', 0.2)
             
             # 创建自编码器模型
-            model = AutoencoderModel(
+            model = AutoencoderTrainer(
                 encoder_type=encoder_type,
                 latent_dim=latent_dim,
                 input_dim=input_dim,
@@ -526,7 +528,7 @@ class ImitationLearningService:
             dropout_rate = model_config.get('dropout_rate', 0.2)
             
             # 创建Transformer模型
-            model = TransformerModel(
+            model = TransformerTrainer(
                 encoder_type=encoder_type,
                 input_dim=input_dim,
                 d_model=d_model,
@@ -538,40 +540,37 @@ class ImitationLearningService:
             
         elif model_type == 'DiffusionTrajGenerator':
             # 提取扩散轨迹生成器参数
-            state_dim = model_config.get('state_dim', 32)
-            action_dim = model_config.get('action_dim', 8)
-            hidden_dim = model_config.get('hidden_dim', 128)
-            num_diffusion_steps = model_config.get('num_diffusion_steps', 100)
+            diffusion_steps = model_config.get('diffusion_steps', 1000)
+            noise_schedule = model_config.get('noise_schedule', 'cosine')
+            seq_length = model_config.get('seq_length', 120)
+            dropout = model_config.get('dropout', 0.2)
+            im_embd = model_config.get('im_embd', 128)
             
             # 创建扩散轨迹生成器
             model = DiffusionTrajGenerator(
-                state_dim=state_dim,
-                action_dim=action_dim,
-                hidden_dim=hidden_dim,
-                num_diffusion_steps=num_diffusion_steps
+                diffusion_steps=diffusion_steps,
+                noise_schedule=noise_schedule,
+                seq_length=seq_length,
+                dropout=dropout,
+                im_embd=im_embd
             )
             
         elif model_type == 'VAETrajGenerator':
             # 提取VAE轨迹生成器参数
-            input_dim = model_config.get('input_dim', 32)
-            hidden_dim = model_config.get('hidden_dim', 128)
-            latent_dim = model_config.get('latent_dim', 16)
-            sequence_length = model_config.get('sequence_length', 50)
-            
-            # 检查是否有离散动作信息
-            discrete_action = model_config.get('discrete_action', False)
-            
-            # 如果数据中包含离散动作信息，优先使用数据中的信息
-            if 'is_discrete_action' in expert_trajectories:
-                discrete_action = expert_trajectories['is_discrete_action']
+            self.logger.info("使用VAE训练方法")
+            latent_dim = model_config.get('latent_dim', 64)
+            kl_weight = model_config.get('kl_weight', 0.001)
+            recon_loss_type = model_config.get('recon_loss_type', 'mse')
+            dropout = model_config.get('dropout', 0.2)
+            im_embd = model_config.get('im_embd', 128)
             
             # 创建VAE轨迹生成器
             model = VAETrajGenerator(
-                input_dim=input_dim,
-                hidden_dim=hidden_dim,
                 latent_dim=latent_dim,
-                sequence_length=sequence_length,
-                discrete_action=discrete_action
+                kl_weight=kl_weight,
+                recon_loss_type=recon_loss_type,
+                dropout=dropout,
+                im_embd=im_embd
             )
             
         else:
@@ -717,19 +716,25 @@ class ImitationLearningService:
         
         try:
             # 创建模型
-            model = self._create_model(model_type, model_config or {})
-            
-            # 加载模型参数
-            model.load_state_dict(torch.load(model_path, map_location=self.device))
-            
-            # 生成模型ID
-            model_id = f"{model_type}_{int(time.time())}"
-            
-            # 保存模型
-            self.models[model_id] = model
-            
-            self.logger.info(f"模型加载成功: {model_id}")
-            return model_id
+            if model_type not in ['AutoencoderModel', 'TransformerModel', 'DiffusionTrajGenerator', 'VAETrajGenerator']:
+                model = self._create_model(model_type, model_config or {})
+                
+                # 加载模型参数
+                model.load_state_dict(torch.load(model_path, map_location=self.device))
+                
+                # 生成模型ID
+                model_id = f"{model_type}_{int(time.time())}"
+                
+                # 保存模型
+                self.models[model_id] = model
+                
+                self.logger.info(f"模型加载成功: {model_id}")
+                return model_id
+            else:
+                if model_type == 'DiffusionTrajGenerator':
+                    model = DiffusionTrajGenerator.load_model(model_path)
+                elif model_type == 'VAETrajGenerator':
+                    model = VAETrajGenerator.load_model(model_path)
             
         except Exception as e:
             self.logger.error(f"模型加载失败: {str(e)}")
@@ -804,7 +809,7 @@ class ImitationLearningService:
                 input_data = input_data.to(self.device)
             
             # 根据模型类型选择不同的编码方法
-            if isinstance(model, AutoencoderModel):
+            if isinstance(model, AutoencoderTrainer):
                 # 使用自编码器模型编码
                 with torch.no_grad():
                     encoded = model.encode(input_data)
@@ -844,7 +849,7 @@ class ImitationLearningService:
                 latent_code = latent_code.to(self.device)
             
             # 根据模型类型选择不同的解码方法
-            if isinstance(model, AutoencoderModel):
+            if isinstance(model, AutoencoderTrainer):
                 # 使用自编码器模型解码
                 with torch.no_grad():
                     decoded = model.decode(latent_code)

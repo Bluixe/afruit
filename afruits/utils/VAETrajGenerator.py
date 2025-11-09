@@ -27,8 +27,7 @@ class VAETrajGenerator:
                  kl_weight: float = 0.001,
                  recon_loss_type: str = "mse",
                  dropout: float = 0.2,
-                 im_embd: int = 128,
-                 discrete_action: bool = False):
+                 im_embd: int = 128):
         """
         初始化VAE轨迹生成器
         
@@ -69,6 +68,15 @@ class VAETrajGenerator:
         self.scheduler = None
 
         self.dataloader_util = DataLoaderUtil()
+
+        self.config_to_save = {
+            'latent_dim': self.latent_dim,
+            'kl_weight': self.kl_weight,
+            'recon_loss_type': self.recon_loss_type,
+            'dropout': self.dropout,
+            'im_embd': self.im_embd,
+            'discrete_action': self.discrete_action
+        }
         
     def load_dataset(self, data: str, batch_size: int = 32) -> Dict:
         """
@@ -100,6 +108,12 @@ class VAETrajGenerator:
         is_image_state = False
         image_shape = None
         self.seq_length = seq_length
+
+        self.config_to_save.update({
+            'state_dim': state_dim,
+            'action_dim': action_dim,
+            'seq_length': seq_length
+        })
         
         # 新格式：分别包含状态和动作维度
         if isinstance(state_dim, tuple) and len(state_dim) == 1:
@@ -368,7 +382,7 @@ class VAETrajGenerator:
         z = mu + eps * std
         return z
     
-    def train(self, dataloader: DataLoader, epochs: int = 100) -> Dict:
+    def train(self, dataloader: DataLoader, epochs: int = 100, learning_rate = 1e-4) -> Dict:
         """
         模型训练
         
@@ -589,7 +603,7 @@ class VAETrajGenerator:
                     'latent_codes': z.cpu().numpy()
                 }
     
-    def save_model(self, save_path: str) -> None:
+    def save_model(self, save_path = None) -> None:
         """
         保存模型参数和配置
         
@@ -598,6 +612,10 @@ class VAETrajGenerator:
         """
         if self.encoder is None or self.decoder is None:
             raise ValueError("模型尚未构建，请先调用build_model")
+
+        if save_path is None:
+            # 默认保存路径
+            save_path = f"models/vae_traj_generator.pt"
         
         # 确保目录存在
         os.makedirs(os.path.dirname(os.path.abspath(save_path)), exist_ok=True)
@@ -608,89 +626,135 @@ class VAETrajGenerator:
             'decoder_state_dict': self.decoder.state_dict(),
             'optimizer_state_dict': self.optimizer.state_dict() if self.optimizer else None,
             'scheduler_state_dict': self.scheduler.state_dict() if self.scheduler else None,
-            'config': {
-                'latent_dim': self.latent_dim,
-                'seq_length': self.seq_length,
-                'kl_weight': self.kl_weight,
-                'recon_loss_type': self.recon_loss_type,
-                'physics_constraints': self.physics_constraints,
-                'dropout': self.dropout,
-                'im_embd': self.im_embd,
-                'is_image_state': self.is_image_state,
-                'image_shape': self.image_shape
-            }
+            'config': {k:v for k,v in self.config_to_save.items()}
         }
         
         # 保存模型
         torch.save(model_state, save_path)
         
-        # 保存配置信息到JSON文件（可选，便于查看）
         config_path = os.path.splitext(save_path)[0] + '_config.json'
         with open(config_path, 'w', encoding='utf-8') as f:
             json.dump(model_state['config'], f, ensure_ascii=False, indent=4)
             
         print(f"模型已保存至: {save_path}")
         print(f"配置已保存至: {config_path}")
-    
-    def load_model(self, load_path: str, input_dim: int = None) -> None:
+
+    @staticmethod
+    def load_model(load_path, device: torch.device = None) -> 'VAETrajGenerator':
         """
-        加载模型参数和配置
+        静态方法：加载模型参数和配置，返回VAETrajGenerator实例
         
         参数:
             load_path (str): 模型文件路径，应以.pt结尾
-            input_dim (int, optional): 输入特征维度，如果为None则使用保存的配置
-        
+            device (torch.device, optional): 设备，如果为None则自动选择
+            
         返回值:
-            成功加载返回True，否则抛出异常
+            VAETrajGenerator实例
         """
+        if load_path is None:
+            load_path = f"models/vae_traj_generator.pt"
+
+        if device is None:
+            device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        
         if not os.path.exists(load_path):
             raise FileNotFoundError(f"模型文件 {load_path} 不存在")
         
         # 加载模型状态
-        model_state = torch.load(load_path, map_location=self.device)
+        model_state = torch.load(load_path, map_location=device)
         
-        # 更新配置
+        # 提取配置
         config = model_state.get('config', {})
-        self.latent_dim = config.get('latent_dim', self.latent_dim)
-        self.seq_length = config.get('seq_length', self.seq_length)
-        self.kl_weight = config.get('kl_weight', self.kl_weight)
-        self.recon_loss_type = config.get('recon_loss_type', self.recon_loss_type)
-        self.physics_constraints = config.get('physics_constraints', self.physics_constraints)
-        self.dropout = config.get('dropout', self.dropout)
-        self.im_embd = config.get('im_embd', self.im_embd)
-        self.is_image_state = config.get('is_image_state', False)
-        self.image_shape = config.get('image_shape', None)
         
-        # 如果没有提供input_dim，尝试从模型结构推断
-        if input_dim is None:
-            # 尝试从解码器的输出层获取维度
-            decoder_dict = model_state['decoder_state_dict']
-            for key in decoder_dict:
-                if 'fc_out.weight' in key:
-                    input_dim = decoder_dict[key].size(0)
-                    break
-            
-            if input_dim is None:
-                raise ValueError("无法从模型中推断input_dim，请手动提供")
+        # 创建VAETrajGenerator实例
+        vae_generator = VAETrajGenerator(
+            latent_dim=config.get('latent_dim', 64),
+            kl_weight=config.get('kl_weight', 0.001),
+            recon_loss_type=config.get('recon_loss_type', 'mse'),
+            dropout=config.get('dropout', 0.2),
+            im_embd=config.get('im_embd', 128)
+        )
         
         # 构建模型
-        self.build_model(input_dim)
+        state_dim = config.get('state_dim')
+        action_dim = config.get('action_dim')
+        seq_length = config.get('seq_length')
+        vae_generator.build_model(state_dim, action_dim, seq_length)
         
         # 加载模型参数
-        self.encoder.load_state_dict(model_state['encoder_state_dict'])
-        self.decoder.load_state_dict(model_state['decoder_state_dict'])
+        vae_generator.encoder.load_state_dict(model_state['encoder_state_dict'])
+        vae_generator.decoder.load_state_dict(model_state['decoder_state_dict'])
         
         # 加载优化器状态（如果存在）
-        if 'optimizer_state_dict' in model_state and model_state['optimizer_state_dict'] and self.optimizer:
-            self.optimizer.load_state_dict(model_state['optimizer_state_dict'])
+        if 'optimizer_state_dict' in model_state and model_state['optimizer_state_dict'] and vae_generator.optimizer:
+            vae_generator.optimizer.load_state_dict(model_state['optimizer_state_dict'])
             
         # 加载调度器状态（如果存在）
-        if 'scheduler_state_dict' in model_state and model_state['scheduler_state_dict'] and self.scheduler:
-            self.scheduler.load_state_dict(model_state['scheduler_state_dict'])
+        if 'scheduler_state_dict' in model_state and model_state['scheduler_state_dict'] and vae_generator.scheduler:
+            vae_generator.scheduler.load_state_dict(model_state['scheduler_state_dict'])
             
         print(f"模型已从 {load_path} 加载")
-        print(f"配置: latent_dim={self.latent_dim}, seq_length={self.seq_length}, kl_weight={self.kl_weight}")
-        if self.is_image_state:
-            print(f"图像状态配置: image_shape={self.image_shape}, dropout={self.dropout}, im_embd={self.im_embd}")
+        return vae_generator
+    
+    # def load_model(self, load_path: str, input_dim: int = None) -> None:
+    #     """
+    #     加载模型参数和配置
         
-        return True
+    #     参数:
+    #         load_path (str): 模型文件路径，应以.pt结尾
+    #         input_dim (int, optional): 输入特征维度，如果为None则使用保存的配置
+        
+    #     返回值:
+    #         成功加载返回True，否则抛出异常
+    #     """
+    #     if not os.path.exists(load_path):
+    #         raise FileNotFoundError(f"模型文件 {load_path} 不存在")
+        
+    #     # 加载模型状态
+    #     model_state = torch.load(load_path, map_location=self.device)
+        
+    #     # 更新配置
+    #     config = model_state.get('config', {})
+    #     self.latent_dim = config.get('latent_dim', self.latent_dim)
+    #     self.seq_length = config.get('seq_length', self.seq_length)
+    #     self.kl_weight = config.get('kl_weight', self.kl_weight)
+    #     self.recon_loss_type = config.get('recon_loss_type', self.recon_loss_type)
+    #     self.physics_constraints = config.get('physics_constraints', self.physics_constraints)
+    #     self.dropout = config.get('dropout', self.dropout)
+    #     self.im_embd = config.get('im_embd', self.im_embd)
+    #     self.is_image_state = config.get('is_image_state', False)
+    #     self.image_shape = config.get('image_shape', None)
+        
+    #     # 如果没有提供input_dim，尝试从模型结构推断
+    #     if input_dim is None:
+    #         # 尝试从解码器的输出层获取维度
+    #         decoder_dict = model_state['decoder_state_dict']
+    #         for key in decoder_dict:
+    #             if 'fc_out.weight' in key:
+    #                 input_dim = decoder_dict[key].size(0)
+    #                 break
+            
+    #         if input_dim is None:
+    #             raise ValueError("无法从模型中推断input_dim，请手动提供")
+        
+    #     # 构建模型
+    #     self.build_model(input_dim)
+        
+    #     # 加载模型参数
+    #     self.encoder.load_state_dict(model_state['encoder_state_dict'])
+    #     self.decoder.load_state_dict(model_state['decoder_state_dict'])
+        
+    #     # 加载优化器状态（如果存在）
+    #     if 'optimizer_state_dict' in model_state and model_state['optimizer_state_dict'] and self.optimizer:
+    #         self.optimizer.load_state_dict(model_state['optimizer_state_dict'])
+            
+    #     # 加载调度器状态（如果存在）
+    #     if 'scheduler_state_dict' in model_state and model_state['scheduler_state_dict'] and self.scheduler:
+    #         self.scheduler.load_state_dict(model_state['scheduler_state_dict'])
+            
+    #     print(f"模型已从 {load_path} 加载")
+    #     print(f"配置: latent_dim={self.latent_dim}, seq_length={self.seq_length}, kl_weight={self.kl_weight}")
+    #     if self.is_image_state:
+    #         print(f"图像状态配置: image_shape={self.image_shape}, dropout={self.dropout}, im_embd={self.im_embd}")
+        
+    #     return True

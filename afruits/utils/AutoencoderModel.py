@@ -3,6 +3,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 from torch.utils.data import DataLoader, TensorDataset
+import os
+import json
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
@@ -24,10 +26,8 @@ class AutoencoderModel(nn.Module):
     def __init__(self,
                  encoder_type="lstm",  # 编码器类型: "str"或"transformer"
                  latent_dim=32,       # 隐空间维度
-                 seq_length=100,      # 序列长度
                  kl_weight=0.001,     # 正则化权重
-                 dropout_rate=0.2,    # Dropout比率
-                 action_dim=None):    # 动作空间维度（用于one-hot编码）
+                 dropout_rate=0.2):   
         """
         初始化AutoencoderModel
         
@@ -43,13 +43,10 @@ class AutoencoderModel(nn.Module):
         
         self.encoder_type = encoder_type
         self.latent_dim = latent_dim
-        self.seq_length = seq_length
         self.kl_weight = kl_weight
         self.dropout_rate = dropout_rate
-        self.action_dim = action_dim
         self.device = device
-        
-        # 根据编码器类型初始化不同的编码器
+        self.seq_length = None
 
         # 图像输入检测和处理
         self.is_image_input = False
@@ -71,23 +68,7 @@ class AutoencoderModel(nn.Module):
             
             self.position_embedding.data = pe.unsqueeze(0)
     
-    def load_sequences(self, raw_data, batch_size=32, mode="train_test"):
-        """
-        加载序列数据
-        
-        参数:
-            raw_data (dict): 原始数据
-            batch_size (int): 批处理大小
-            
-        返回:
-            DataLoader: 数据加载器
-        """
-        data = self.dataloader_util.load_expert_data(raw_data, batch_size=batch_size)
-        data_loader = data['dataloader']
-        
-        return data_loader
-    
-    def build_model(self, input_dim, output_dim=None, action_dim=None):
+    def build_model(self, input_dim, action_dim, seq_length):
         """
         构建模型
         
@@ -100,6 +81,7 @@ class AutoencoderModel(nn.Module):
         """
         # 检测是否为图像输入并设置图像编码器和解码器
         self.input_dim = input_dim
+        self.seq_length = seq_length
         if isinstance(self.input_dim, tuple) and len(self.input_dim) == 3:
             self.is_image_input = True
             c, h, w = self.input_dim
@@ -131,7 +113,7 @@ class AutoencoderModel(nn.Module):
             input_dim = self.input_dim
 
         self.input_dim = input_dim
-        self.output_dim = output_dim if output_dim is not None else input_dim
+        self.output_dim = input_dim
         self.action_dim = action_dim
         
         if self.encoder_type == "lstm":
@@ -365,6 +347,82 @@ class AutoencoderModel(nn.Module):
             # 这里只返回编码后的动作，不对动作进行自编码重构
         
         return output, z
+
+
+class AutoencoderTrainer:
+
+    def __init__(self,
+                 encoder_type="lstm",  # 编码器类型: "str"或"transformer"
+                 latent_dim=32,       # 隐空间维度
+                 seq_length=100,      # 序列长度
+                 kl_weight=0.001,     # 正则化权重
+                 dropout_rate=0.2):    # 动作空间维度（用于one-hot编码）
+        """
+        初始化AutoencoderModel
+        
+        参数:
+            encoder_type (str): 编码器类型，可选"lstm"或"transformer"
+            latent_dim (int): 隐空间维度
+            seq_length (int): 序列长度
+            input_dim (int): 输入特征维度
+            kl_weight (float): 正则化权重
+            dropout_rate (float): Dropout比率
+        """
+        
+        self.encoder_type = encoder_type
+        self.latent_dim = latent_dim
+        self.seq_length = seq_length
+        self.kl_weight = kl_weight
+        self.dropout_rate = dropout_rate
+        self.device = device
+
+        self.model = AutoencoderModel(
+            encoder_type=self.encoder_type,
+            latent_dim=self.latent_dim,
+            seq_length=self.seq_length,
+            kl_weight=self.kl_weight,
+            dropout_rate=self.dropout_rate,
+        ).to(self.device)
+
+        self.config_to_save = {
+            'encoder_type': self.encoder_type,
+            'latent_dim': self.latent_dim,
+            'seq_length': self.seq_length,
+            'kl_weight': self.kl_weight,
+            'dropout_rate': self.dropout_rate,
+            'action_dim': self.action_dim
+        }
+
+    def build_model(self, input_dim, action_dim, seq_length):
+        """
+        构建模型
+        
+        参数:
+            input_dim (int): 输入维度
+            output_dim (int, optional): 输出维度，默认与输入维度相同
+            
+        返回:
+            AutoencoderModel: 构建好的模型
+        """
+        self.model.build_model(input_dim, action_dim, seq_length)
+        return self.model
+    
+    def load_sequences(self, raw_data, batch_size=32, mode="train_test"):
+        """
+        加载序列数据
+        
+        参数:
+            raw_data (dict): 原始数据
+            batch_size (int): 批处理大小
+            
+        返回:
+            DataLoader: 数据加载器
+        """
+        dataloader_util = DataLoaderUtil()
+        data = dataloader_util.load_expert_data(raw_data, batch_size=batch_size)
+        data_loader = data['dataloader']
+        
+        return data_loader
     
     def train_model(self, data_loader, val_loader=None, epochs=10, learning_rate=0.001, process_actions=True):
         """
@@ -391,7 +449,7 @@ class AutoencoderModel(nn.Module):
         # 训练循环
         for epoch in range(epochs):
             # 训练模式
-            self.train()
+            self.model.train()
             train_loss = 0.0
             
             for batch in data_loader:
@@ -400,7 +458,7 @@ class AutoencoderModel(nn.Module):
                 actions = batch[1].to(self.device) if len(batch) > 1 and process_actions else None
                 
                 # 前向传播
-                output, z = self((states, actions) if actions is not None else (states,))
+                output, z = self.model((states, actions) if actions is not None else (states,))
                 
                 # 计算重构损失 (只针对状态进行重构)
                 recon_loss = F.mse_loss(output, states)
@@ -435,6 +493,7 @@ class AutoencoderModel(nn.Module):
         
         return history
     
+        
     def evaluate(self, data_loader):
         """
         评估模型
@@ -446,7 +505,7 @@ class AutoencoderModel(nn.Module):
             dict: 评估结果
         """
         # 评估模式
-        self.eval()
+        self.model.eval()
         eval_loss = 0.0
         
         with torch.no_grad():
@@ -456,7 +515,7 @@ class AutoencoderModel(nn.Module):
                 actions = batch[1].to(self.device) if len(batch) > 1 else None
                 
                 # 前向传播
-                output, z = self((states, actions) if actions is not None else (states,))
+                output, z = self.model((states, actions) if actions is not None else (states,))
                 
                 # 计算重构损失 (只针对状态进行重构)
                 recon_loss = F.mse_loss(output, states)
@@ -484,3 +543,85 @@ class AutoencoderModel(nn.Module):
         }
         
         return results
+
+    def save_model(self, save_path = None) -> None:
+        """
+        保存模型参数和配置
+        
+        参数:
+            save_path (str): 保存路径，应以.pt结尾
+        """
+        if self.encoder is None or self.decoder is None:
+            raise ValueError("模型尚未构建，请先调用build_model")
+
+        if save_path is None:
+            # 默认保存路径
+            save_path = f"models/auto_encoder.pt"
+        
+        # 确保目录存在
+        os.makedirs(os.path.dirname(os.path.abspath(save_path)), exist_ok=True)
+        
+        # 保存模型参数和配置
+        model_state = {
+            'state_dict': self.model.state_dict(),
+            'config': {k:v for k,v in self.config_to_save.items()}
+        }
+        
+        # 保存模型
+        torch.save(model_state, save_path)
+        
+        config_path = os.path.splitext(save_path)[0] + '_config.json'
+        with open(config_path, 'w', encoding='utf-8') as f:
+            json.dump(model_state['config'], f, ensure_ascii=False, indent=4)
+            
+        print(f"模型已保存至: {save_path}")
+        print(f"配置已保存至: {config_path}")
+
+    @staticmethod
+    def load_model(load_path):
+        """
+        加载模型参数和配置
+        
+        参数:
+            load_path (str): 模型加载路径，应以.pt结尾
+            
+        返回:
+            AutoencoderTrainer: 加载好的模型实例
+        """
+        if load_path is None:
+            load_path = f"models/auto_encoder.pt"
+        if not os.path.isfile(load_path):
+            raise FileNotFoundError(f"模型文件未找到: {load_path}")
+        
+        # 加载模型状态
+        model_state = torch.load(load_path, map_location=device)
+        
+        # 提取配置
+        config = model_state.get('config', {})
+        
+        # 创建模型实例
+        model_trainer = AutoencoderTrainer(
+            encoder_type=config.get('encoder_type', 'lstm'),
+            latent_dim=config.get('latent_dim', 32),
+            seq_length=config.get('seq_length', 100),
+            kl_weight=config.get('kl_weight', 0.001),
+            dropout_rate=config.get('dropout_rate', 0.2)
+        )
+        
+        # 构建模型
+        input_dim = config.get('input_dim', None)
+        action_dim = config.get('action_dim', None)
+        seq_length = config.get('seq_length', 100)
+        if input_dim is None:
+            raise ValueError("配置中缺少input_dim，无法构建模型")
+        
+        model_trainer.build_model(input_dim, action_dim, seq_length)
+        
+        # 加载模型参数
+        model_trainer.model.load_state_dict(model_state['state_dict'])
+        
+        print(f"模型已从 {load_path} 加载")
+        
+        return model_trainer
+    
+
