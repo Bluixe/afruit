@@ -11,9 +11,9 @@ from collections import deque
 
 class IncrementalLearner:
     """
-    增量学习器类
+    增量学习器类 - 简化版
     
-    功能定位：实现动态数据流下的持续模型优化与知识保留
+    功能定位：使用新数据读取模型并进行增量训练
     
     核心特性：
     • 实时性适应：支持回放/正则化/多任务机制
@@ -23,60 +23,93 @@ class IncrementalLearner:
     """
     
     def __init__(self,
+                 base_model: Optional[nn.Module] = None,
+                 model_type: str = "",
+                 optimizer_config: Dict = {},
                  memory_buffer_size: int = 1000,
-                 regularization_strength: float = 0.5,
-                 replay_strategy: str = "generative",
-                 task_heads: dict = {},
-                 adaptive_lr: bool = True):
+                 replay_strategy: str = "random"):
         """
         初始化增量学习器
         
         参数:
+            base_model (nn.Module, optional): 预训练模型对象
+            model_type (str): 模型类型，用于确定使用哪种训练方法
+            optimizer_config (Dict): 优化器参数配置
             memory_buffer_size (int): 历史样本回放缓冲区容量
-            regularization_strength (float): 弹性权重保持系数(0.1-2.0)
             replay_strategy (str): 回放策略("random", "prioritized", "generative")
-            task_heads (dict): 多任务配置字典
-            adaptive_lr (bool): 启用自适应学习率机制
         """
         # 初始化参数
+        self.base_model = base_model
+        self.model_type = model_type
+        assert model_type in ["AutoencoderModel", "TransformerModel", "DiffusionTrajGenerator", "VAETrajGenerator"]
+        self.optimizer_config = optimizer_config
         self.memory_buffer_size = memory_buffer_size
-        self.regularization_strength = regularization_strength
         self.replay_strategy = replay_strategy
-        self.task_heads = task_heads
-        self.adaptive_lr = adaptive_lr
         
         # 初始化内部状态
         self.memory_buffer = deque(maxlen=self.memory_buffer_size)
         self.model = None
         self.optimizer = None
         self.drift_detector = None
-        self.is_initialized = False
         
-        # 验证参数
-        self._validate_params()
+        # 训练状态跟踪
+        self.is_trained = False
+        self.training_history = {}
     
-    def _validate_params(self):
-        """验证初始化参数是否合法"""
-        # 验证memory_buffer_size
-        if not isinstance(self.memory_buffer_size, int) or self.memory_buffer_size <= 0:
-            raise ValueError(f"memory_buffer_size必须为正整数，当前值: {self.memory_buffer_size}")
+    def setup_model(self, pretrained_weights: Optional[str] = None):
+        """
+        模型加载与配置
         
-        # 验证regularization_strength
-        if not isinstance(self.regularization_strength, float) or not (0.1 <= self.regularization_strength <= 2.0):
-            raise ValueError(f"regularization_strength必须在0.1-2.0范围内，当前值: {self.regularization_strength}")
+        参数:
+            pretrained_weights (str, optional): 预训练权重路径
         
-        # 验证replay_strategy
-        valid_strategies = ["random", "prioritized", "generative"]
-        if self.replay_strategy not in valid_strategies:
-            raise ValueError(f"replay_strategy必须为 {valid_strategies} 之一，当前值: {self.replay_strategy}")
+        返回值:
+            nn.Module: 设置好的模型
+        """
+        # 检查基础模型是否存在
+        if self.base_model is None:
+            raise ValueError("基础模型未设置，请先设置base_model")
         
-        # 验证task_heads
-        if not isinstance(self.task_heads, dict):
-            raise ValueError(f"task_heads必须为字典类型，当前类型: {type(self.task_heads)}")
+        # 创建模型副本以避免修改原始模型
+        self.model = copy.deepcopy(self.base_model)
         
-        # 验证adaptive_lr
-        if not isinstance(self.adaptive_lr, bool):
-            raise ValueError(f"adaptive_lr必须为布尔类型，当前类型: {type(self.adaptive_lr)}")
+        # 加载预训练权重（如果提供）
+        if pretrained_weights:
+            try:
+                # 尝试加载权重
+                state_dict = torch.load(pretrained_weights)
+                self.model.load_state_dict(state_dict)
+                print(f"成功加载预训练权重: {pretrained_weights}")
+            except Exception as e:
+                print(f"加载预训练权重失败: {str(e)}")
+        
+        # 设置优化器
+        self._setup_optimizer()
+        
+        return self.model
+    
+    def _setup_optimizer(self):
+        """设置优化器"""
+        # 获取优化器配置
+        lr = self.optimizer_config.get('lr', 0.001)
+        weight_decay = self.optimizer_config.get('weight_decay', 0.0)
+        optimizer_type = self.optimizer_config.get('type', 'Adam')
+        
+        # 使用统一的学习率
+        params = [p for p in self.model.parameters() if p.requires_grad]
+        
+        # 创建优化器
+        if optimizer_type == 'Adam':
+            self.optimizer = optim.Adam(params, lr=lr, weight_decay=weight_decay)
+        elif optimizer_type == 'SGD':
+            momentum = self.optimizer_config.get('momentum', 0.9)
+            self.optimizer = optim.SGD(params, lr=lr, momentum=momentum, weight_decay=weight_decay)
+        elif optimizer_type == 'RMSprop':
+            self.optimizer = optim.RMSprop(params, lr=lr, weight_decay=weight_decay)
+        else:
+            raise ValueError(f"不支持的优化器类型: {optimizer_type}")
+        
+        return self.optimizer
     def monitor_data_stream(self, new_data, drift_threshold: float = 0.3) -> dict:
         """
         数据流监控
@@ -276,148 +309,22 @@ class IncrementalLearner:
             self.model = model
             
             return update_with_ewc
-    def train_with_replay(self, new_data, epochs: int = 10):
+    def prepare_data(self, raw_data, batch_size: int = 32):
         """
-        混合训练
+        数据预处理
         
-        输入参数:
-            new_data (DataLoader): 新增数据加载器
-            epochs (int): 训练轮次
+        参数:
+            raw_data (Dataset): 原始增量数据集
+            batch_size (int): 批次大小，默认为32
         
         返回值:
-            训练指标 (dict):
-                old_task_acc: 历史任务准确率
-                new_task_acc: 新任务准确率
-                forgetting_rate: 遗忘速率
+            DataLoader: 训练数据加载器
         """
-        # 检查输入参数
-        if new_data is None:
-            raise ValueError("new_data不能为None")
-        
-        if not isinstance(epochs, int) or epochs <= 0:
-            raise ValueError(f"epochs必须为正整数，当前值: {epochs}")
-        
-        # 检查模型是否已初始化
-        if self.model is None:
-            raise ValueError("模型尚未初始化，请先初始化模型")
-        
-        # 初始化训练指标
-        training_metrics = {
-            'old_task_acc': 0.0,
-            'new_task_acc': 0.0,
-            'forgetting_rate': 0.0
-        }
-        
-        # 准备回放数据
-        replay_data = self._prepare_replay_data()
-        
-        # 如果没有回放数据，直接使用新数据训练
-        if replay_data is None or len(replay_data) == 0:
-            print("警告: 没有可用的回放数据，仅使用新数据训练")
-            return self._train_on_new_data(new_data, epochs)
-        
-        # 设置损失函数
-        criterion = nn.CrossEntropyLoss() if self._is_classification_task() else nn.MSELoss()
-        
-        # 评估旧任务初始性能
-        initial_old_task_acc = self._evaluate_on_data(replay_data)
-        
-        # 混合训练过程
-        for epoch in range(epochs):
-            # 在新数据上训练
-            new_task_loss = 0.0
-            new_samples = 0
-            
-            for inputs, targets in new_data:
-                # 前向传播
-                outputs = self.model(inputs)
-                loss = criterion(outputs, targets)
-                
-                # 反向传播和优化
-                self.optimizer.zero_grad()
-                loss.backward()
-                self.optimizer.step()
-                
-                new_task_loss += loss.item() * inputs.size(0)
-                new_samples += inputs.size(0)
-            
-            # 计算新任务平均损失
-            new_task_loss /= new_samples
-            
-            # 在回放数据上训练
-            replay_loss = 0.0
-            replay_samples = 0
-            
-            for inputs, targets in replay_data:
-                # 前向传播
-                outputs = self.model(inputs)
-                loss = criterion(outputs, targets)
-                
-                # 反向传播和优化
-                self.optimizer.zero_grad()
-                loss.backward()
-                self.optimizer.step()
-                
-                replay_loss += loss.item() * inputs.size(0)
-                replay_samples += inputs.size(0)
-            
-            # 计算回放数据平均损失
-            if replay_samples > 0:
-                replay_loss /= replay_samples
-            
-            # 打印训练进度
-            if (epoch + 1) % 2 == 0:
-                print(f"Epoch {epoch+1}/{epochs}, New Task Loss: {new_task_loss:.4f}, Replay Loss: {replay_loss:.4f}")
-        
-        # 评估训练后性能
-        training_metrics['old_task_acc'] = self._evaluate_on_data(replay_data)
-        training_metrics['new_task_acc'] = self._evaluate_on_data(new_data)
-        
-        # 计算遗忘率
-        if initial_old_task_acc > 0:
-            forgetting = (initial_old_task_acc - training_metrics['old_task_acc']) / initial_old_task_acc
-            training_metrics['forgetting_rate'] = max(0.0, forgetting)  # 确保遗忘率非负
-        
-        return training_metrics
-    
-    def _prepare_replay_data(self):
-        """准备回放数据"""
-        if len(self.memory_buffer) == 0:
-            return None
-        
-        # 根据回放策略选择样本
-        if self.replay_strategy == "random":
-            # 随机采样
-            replay_samples = random.sample(list(self.memory_buffer), 
-                                          min(len(self.memory_buffer), self.memory_buffer_size // 2))
-        elif self.replay_strategy == "prioritized":
-            # 优先采样（这里简化为最近的样本优先）
-            replay_samples = list(self.memory_buffer)[-self.memory_buffer_size // 2:]
-        elif self.replay_strategy == "generative":
-            # 生成式回放（简化实现）
-            replay_samples = list(self.memory_buffer)
-            # 在实际应用中，这里应该使用生成模型生成样本
-        
-        # 转换为DataLoader格式
-        # 注意：这里假设样本是(inputs, targets)格式
-        inputs = []
-        targets = []
-        
-        for sample in replay_samples:
-            if isinstance(sample, tuple) and len(sample) >= 2:
-                inputs.append(sample[0])
-                targets.append(sample[1])
-        
-        if not inputs or not targets:
-            return None
-        
-        # 转换为张量
-        inputs_tensor = torch.stack(inputs) if isinstance(inputs[0], torch.Tensor) else torch.tensor(inputs)
-        targets_tensor = torch.stack(targets) if isinstance(targets[0], torch.Tensor) else torch.tensor(targets)
-        
-        # 创建数据集和数据加载器
-        dataset = TensorDataset(inputs_tensor, targets_tensor)
-        return DataLoader(dataset, batch_size=32, shuffle=True)
+        from afruits.utils.DataLoader import DataLoaderUtil
+        dataloader_util = DataLoaderUtil()
+        data = dataloader_util.load_expert_data(raw_data, batch_size=batch_size)
+        data_loader = data['dataloader']
+        return data_loader
     
     def _train_on_new_data(self, new_data, epochs):
         """仅在新数据上训练"""
@@ -484,20 +391,39 @@ class IncrementalLearner:
         accuracy = max(0.0, 1.0 - avg_loss / 10.0)  # 假设损失最大为10
         return min(1.0, accuracy)  # 确保准确率不超过1.0
     
-    def _is_classification_task(self):
-        """判断是否为分类任务"""
-        # 简化实现：根据任务头判断
-        if not self.task_heads:
-            # 默认为回归任务
-            return False
+    def incremental_train(self, train_loader, model, max_epochs=10, learning_rate=1e-4):
+        """
+        根据模型类型选择合适的训练方法进行增量训练
         
-        # 检查第一个任务头的输出类型
-        first_task = next(iter(self.task_heads.values()))
-        if isinstance(first_task, dict) and 'type' in first_task:
-            return first_task['type'] == 'classification'
+        参数:
+            train_loader: 训练数据加载器
+            model: 模型对象
+            max_epochs: 训练轮次
+            learning_rate: 学习率
+            
+        返回值:
+            Dict: 训练报告
+        """
+        if self.model_type == "AutoencoderModel":
+            training_history = model.train_model(train_loader, epochs=max_epochs, learning_rate=learning_rate)
+        elif self.model_type == "TransformerModel":
+            training_history = model.train_model(train_loader, epochs=max_epochs, learning_rate=learning_rate)
+        elif self.model_type == "DiffusionTrajGenerator":
+            training_history = model.train(train_loader, epochs=max_epochs, learning_rate=learning_rate)
+        elif self.model_type == "VAETrajGenerator":
+            training_history = model.train(train_loader, epochs=max_epochs, learning_rate=learning_rate)
+
+        # 保存模型
+        model.save_model()
         
-        return False
-        return False
+        # 更新内存缓冲区
+        self._update_memory_buffer(train_loader)
+        
+        return training_history
+    
+    def get_model(self):
+        """获取训练后的模型"""
+        return self.model
     
     def _update_memory_buffer(self, new_data):
         """更新内存缓冲区"""

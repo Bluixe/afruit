@@ -25,11 +25,13 @@ class EvolutionaryLearner:
     """
     
     def __init__(self,
-                 population_size: int = 50,
+                 population_size: int = 10,
+                 model_type: str = "",
                  mutation_rate: float = 0.15,
                  crossover_rate: float = 0.7,
                  selection_method: str = "tournament",
-                 elitism_ratio: float = 0.1):
+                 elitism_ratio: float = 0.1,
+                 model_config: Dict = {}):
         """
         初始化进化学习器
         
@@ -46,6 +48,8 @@ class EvolutionaryLearner:
         self.crossover_rate = crossover_rate
         self.selection_method = selection_method
         self.elitism_ratio = elitism_ratio
+        assert model_type in ["AutoencoderModel", "TransformerModel", "DiffusionTrajGenerator", "VAETrajGenerator"]
+        self.model_type = model_type
         
         # 初始化种群和适应度
         self.population = []
@@ -835,6 +839,30 @@ class EvolutionaryLearner:
         
         return processed_data
     
+    def _train_autoencoder(self, model, train_loader, epochs: int = 10, learning_rate: float = 1e-4) -> Dict:
+        """自编码器模型训练方法"""
+        print("使用自编码器训练方法")
+        training_history = model.train_model(train_loader, epochs=epochs, learning_rate=learning_rate)
+        return training_history
+    
+    def _train_transformer(self, model, train_loader, epochs: int = 10, learning_rate: float = 1e-4) -> Dict:
+        """Transformer模型训练方法"""
+        print("使用Transformer训练方法")
+        training_history = model.train_model(train_loader, epochs=epochs, learning_rate=learning_rate)
+        return training_history
+    
+    def _train_diffusion(self, model, train_loader, epochs: int = 10, learning_rate: float = 1e-4) -> Dict:
+        """扩散模型训练方法"""
+        print("使用扩散模型训练方法")
+        training_history = model.train(train_loader, epochs=epochs, learning_rate=learning_rate)
+        return training_history
+    
+    def _train_vae(self, model, train_loader, epochs: int = 10, learning_rate: float = 1e-4) -> Dict:
+        """VAE训练方法"""
+        print("使用VAE训练方法")
+        training_history = model.train(train_loader, epochs=epochs, learning_rate=learning_rate)
+        return training_history
+    
     def train_population(self, raw_trajectories: Dict, epochs: int = 10, batch_size: int = 64) -> Dict:
         """
         训练种群中的策略
@@ -856,6 +884,10 @@ class EvolutionaryLearner:
         
         # 预处理数据
         processed_data = self._preprocess_trajectories(raw_trajectories)
+        
+        # 从原始轨迹数据中提取必要信息
+        data, state_dim, action_dim = raw_trajectories["data"], raw_trajectories["state_dim"], raw_trajectories["action_dim"]
+        seq_length = raw_trajectories.get("traj_length", None)
         
         # 训练每个策略
         for policy in self.population:
@@ -884,6 +916,31 @@ class EvolutionaryLearner:
                         'expert_actions': expert_actions
                     }
                     history = policy.train(expert_data, batch_size=batch_size, epochs=epochs)
+                
+                # 根据模型类型选择不同的训练方法
+                elif self.model_type == "AutoencoderModel":
+                    # 准备数据加载器
+                    data_loader = policy.load_sequences(data, batch_size=batch_size)
+                    # 训练自编码器模型
+                    history = self._train_autoencoder(policy, data_loader, epochs=epochs)
+                    
+                elif self.model_type == "TransformerModel":
+                    # 准备数据加载器
+                    data_loader = policy.load_sequences(data, batch_size=batch_size)
+                    # 训练Transformer模型
+                    history = self._train_transformer(policy, data_loader, epochs=epochs)
+                    
+                elif self.model_type == "DiffusionTrajGenerator":
+                    # 准备数据加载器
+                    data_loader = policy.load_dataset(data, batch_size=batch_size)
+                    # 训练扩散模型
+                    history = self._train_diffusion(policy, data_loader, epochs=epochs)
+                    
+                elif self.model_type == "VAETrajGenerator":
+                    # 准备数据加载器
+                    data_loader = policy.load_dataset(data, batch_size=batch_size)
+                    # 训练VAE模型
+                    history = self._train_vae(policy, data_loader, epochs=epochs)
                 
                 # 记录训练历史
                 training_results[policy.id] = history

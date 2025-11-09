@@ -346,18 +346,93 @@ class ImitationLearningService:
             mutation_rate=mutation_rate,
             crossover_rate=crossover_rate,
             selection_method=selection_method,
-            elitism_ratio=elitism_ratio
+            elitism_ratio=elitism_ratio,
+            model_type=model_type,
+            model_config=model_config
         )
         
-        # 创建模型模板
-        model_template = self._create_model(model_type, model_config)
+        # 初始化模型种群
+        models = []
+        for i in range(population_size):
+            # 创建模型
+            if model_type == 'AutoencoderModel':
+                encoder_type = model_config.get('encoder_type', 'lstm')
+                latent_dim = model_config.get('latent_dim', 32)
+                kl_weight = model_config.get('kl_weight', 0.001)
+                dropout_rate = model_config.get('dropout_rate', 0.2)
+                
+                model = AutoencoderTrainer(
+                    encoder_type=encoder_type,
+                    latent_dim=latent_dim,
+                    kl_weight=kl_weight,
+                    dropout_rate=dropout_rate
+                )
+                
+                data, state_dim, action_dim, seq_length = expert_trajectories["data"], expert_trajectories["state_dim"], expert_trajectories["action_dim"], expert_trajectories["traj_length"]
+                model.build_model(state_dim, action_dim, seq_length)
+                
+            elif model_type == 'TransformerModel':
+                d_model = model_config.get('d_model', 128)
+                num_heads = model_config.get('num_heads', 4)
+                num_layers = model_config.get('num_layers', 3)
+                max_seq_len = model_config.get('max_seq_len', 100)
+                dropout_rate = model_config.get('dropout_rate', 0.2)
+                
+                model = TransformerTrainer(
+                    d_model=d_model,
+                    num_heads=num_heads,
+                    num_layers=num_layers,
+                    max_seq_len=max_seq_len,
+                    dropout_rate=dropout_rate
+                )
+                
+                data, state_dim, action_dim = expert_trajectories["data"], expert_trajectories["state_dim"], expert_trajectories["action_dim"]
+                model.build_model(state_dim, action_dim)
+                
+            elif model_type == 'DiffusionTrajGenerator':
+                diffusion_steps = model_config.get('diffusion_steps', 1000)
+                noise_schedule = model_config.get('noise_schedule', 'cosine')
+                dropout = model_config.get('dropout', 0.2)
+                im_embd = model_config.get('im_embd', 128)
+                
+                model = DiffusionTrajGenerator(
+                    diffusion_steps=diffusion_steps,
+                    noise_schedule=noise_schedule,
+                    dropout=dropout,
+                    im_embd=im_embd
+                )
+                
+                data, state_dim, action_dim = expert_trajectories["data"], expert_trajectories["state_dim"], expert_trajectories["action_dim"]
+                model.build_model(state_dim)
+                
+            elif model_type == 'VAETrajGenerator':
+                latent_dim = model_config.get('latent_dim', 64)
+                kl_weight = model_config.get('kl_weight', 0.001)
+                recon_loss_type = model_config.get('recon_loss_type', 'mse')
+                dropout = model_config.get('dropout', 0.2)
+                im_embd = model_config.get('im_embd', 128)
+                
+                model = VAETrajGenerator(
+                    latent_dim=latent_dim,
+                    kl_weight=kl_weight,
+                    recon_loss_type=recon_loss_type,
+                    dropout=dropout,
+                    im_embd=im_embd
+                )
+                
+                data, state_dim, action_dim, seq_length = expert_trajectories["data"], expert_trajectories["state_dim"], expert_trajectories["action_dim"], expert_trajectories["traj_length"]
+                model.build_model(state_dim, action_dim, seq_length)
+            
+            # 为模型添加唯一ID
+            model.id = f"{model_type}_{i}"
+            models.append(model)
         
-        # 创建混合种群
-        population = evolutionary_learner.create_mixed_population(expert_trajectories)
+        # 初始化种群
+        population = evolutionary_learner.initialize_population(models[0], seed=42)
         
-        # 如果种群为空，使用模板初始化种群
-        if not population:
-            population = evolutionary_learner.initialize_population(model_template)
+        # 替换种群中的模型
+        for i in range(min(len(population), len(models))):
+            population[i] = models[i]
         
         # 训练种群
         training_result = evolutionary_learner.train_population(expert_trajectories)
@@ -399,52 +474,58 @@ class ImitationLearningService:
         self.logger.info(f"使用增量学习方法训练 {model_type} 模型")
         
         # 提取增量学习参数
-        base_model_id = model_config.get('base_model_id')
+        learning_rate = model_config.get('learning_rate', 5e-5)
+        epochs = model_config.get('epochs', 20)
+        model_path = model_config.get('model_path', None)
+        batch_size = model_config.get('batch_size', 32)
         memory_size = model_config.get('memory_size', 1000)
-        replay_ratio = model_config.get('replay_ratio', 0.3)
-        learning_rate = model_config.get('learning_rate', 1e-4)
-        epochs = model_config.get('epochs', 50)
+        replay_strategy = model_config.get('replay_strategy', 'random')
+        
+        # 获取基础模型
+        if model_type == 'AutoencoderModel':
+            base_model = AutoencoderTrainer.load_model(model_path)
+        elif model_type == 'TransformerModel':
+            base_model = TransformerTrainer.load_model(model_path)
+        elif model_type == 'DiffusionTrajGenerator':
+            base_model = DiffusionTrajGenerator.load_model(model_path)
+        elif model_type == 'VAETrajGenerator':
+            base_model = VAETrajGenerator.load_model(model_path)
+        else:
+            raise ValueError(f"不支持的模型类型: {model_type}")
+
+        data, state_dim, action_dim, seq_length = expert_trajectories["data"], expert_trajectories["state_dim"], expert_trajectories["action_dim"], expert_trajectories["traj_length"]
+        
+        # 创建优化器配置
+        optimizer_config = {
+            'lr': learning_rate,
+            'type': model_config.get('optimizer_type', 'Adam'),
+            'weight_decay': model_config.get('weight_decay', 0.0)
+        }
         
         # 创建增量学习器
         incremental_learner = IncrementalLearner(
-            memory_size=memory_size,
-            replay_ratio=replay_ratio,
-            learning_rate=learning_rate
+            base_model=base_model,
+            model_type=model_type,
+            optimizer_config=optimizer_config,
+            memory_buffer_size=memory_size,
+            replay_strategy=replay_strategy
         )
         
-        # 获取基础模型
-        if base_model_id and base_model_id in self.models:
-            base_model = self.models[base_model_id]
-        else:
-            # 创建新模型
-            base_model = self._create_model(model_type, model_config)
+        # 设置模型
+        incremental_learner.setup_model()
         
-        # 设置基础模型
-        incremental_learner.set_base_model(base_model)
+        # 准备数据
+        data_loader = incremental_learner.prepare_data(data, batch_size=batch_size)
         
         # 训练模型
-        training_result = incremental_learner.train(expert_trajectories, epochs=epochs)
+        training_result = incremental_learner.incremental_train(data_loader, base_model, max_epochs=epochs, learning_rate=learning_rate)
         
-        # 获取更新后的模型
-        updated_model = incremental_learner.get_model()
+        # 获取增量训练后的模型
+        incremental_model = incremental_learner.get_model()
         
-        # 提取训练指标
-        metrics = {
-            'train_loss': training_result.get('train_loss', []),
-            'val_loss': training_result.get('val_loss', []),
-            'catastrophic_forgetting': training_result.get('catastrophic_forgetting', []),
-            'final_train_loss': training_result.get('train_loss', [-1])[-1] if training_result.get('train_loss') else None,
-            'final_val_loss': training_result.get('val_loss', [-1])[-1] if training_result.get('val_loss') else None,
-            'final_catastrophic_forgetting': training_result.get('catastrophic_forgetting', [-1])[-1] if training_result.get('catastrophic_forgetting') else None
-        }
+        self.logger.info(f"增量学习完成")
         
-        self.logger.info(f"增量学习完成，最终训练损失: {metrics['final_train_loss']}, 验证损失: {metrics['final_val_loss']}, 灾难性遗忘: {metrics['final_catastrophic_forgetting']}")
-        
-        # 保存增量学习器
-        learner_id = f"incremental_{int(time.time())}"
-        self.training_methods[learner_id] = incremental_learner
-        
-        return updated_model, metrics
+        return incremental_model, training_result
     
     def _train_fine_tune(self, model_type: str, expert_trajectories: Dict, model_config: Dict) -> Tuple[Any, Dict]:
         """微调方法"""
