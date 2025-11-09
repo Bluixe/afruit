@@ -275,7 +275,7 @@ class TestAdvancedAlgorithm(unittest.TestCase):
         
         # 配置模型
         model_config = {
-            'training_method': 'incremental',
+            'training_method': 'evolutionary',
             'model_type': 'TransformerModel',  # 使用扩散模型
             'd_model': 64,
             'nhead': 4,

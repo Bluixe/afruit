@@ -8,6 +8,7 @@ import os
 import time
 import random
 from collections import deque
+import copy
 
 class IncrementalLearner:
     """

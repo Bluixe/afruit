@@ -128,27 +128,6 @@ class EvolutionaryLearner:
             # 复制策略模板
             policy = copy.deepcopy(policy_template)
             
-            # 根据策略类型进行差异化初始化
-            if isinstance(policy, OfflineRLearner):
-                # 离线强化学习策略初始化
-                policy.cql_weight = np.random.uniform(0.1, 1.0)
-                policy.perturbation_scale = np.random.uniform(0.01, 0.2)
-                
-                # 重新构建模型以应用新参数
-                if hasattr(policy, 'build_model'):
-                    policy.build_model()
-                
-            elif isinstance(policy, BehaviorCloner):
-                # 行为克隆策略初始化
-                policy.dropout_rate = np.random.uniform(0.1, 0.5)
-                policy.batch_size = np.random.choice([16, 32, 64, 128])
-                
-            elif isinstance(policy, AdversarialImitationLearner):
-                # 对抗模仿学习策略初始化
-                policy.gen_learning_rate = np.random.uniform(1e-5, 1e-3)
-                policy.disc_learning_rate = np.random.uniform(1e-6, 1e-4)
-                policy.gp_lambda = np.random.uniform(1.0, 20.0)
-            
             # 如果策略有网络模型，进行权重随机初始化
             if hasattr(policy, 'model') and policy.model is not None:
                 for param in policy.model.parameters():
