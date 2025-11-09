@@ -704,7 +704,7 @@ class ImitationLearningService:
         
         try:
             # 根据模型类型选择不同的生成方法
-            if isinstance(model, TransformerModel):
+            if isinstance(model, TransformerTrainer):
                 # 使用Transformer模型生成轨迹
                 input_seq = context.get('input_seq') if context else None
                 pred_steps = config.get('pred_steps', 1) if config else 1

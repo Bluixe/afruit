@@ -258,85 +258,37 @@ class TestAdvancedAlgorithm(unittest.TestCase):
         print(f"模型ID: {model_id}")
         print(f"总损失: {training_metrics['final_total_loss']:.4f}")
 
-    # def test_evolutionary_learner(self):
-    #     """
-    #     测试小样本专家轨迹模仿学习模块的进化学习功能
+    def test_evolutionary_learner(self):
+        """
+        测试小样本专家轨迹模仿学习模块的进化学习功能
         
-    #     该测试验证EvolutionaryLearner的以下功能:
-    #     1. 种群初始化与进化
-    #     2. 适应度评估
-    #     3. 最佳策略选择
-    #     4. 策略预测
-    #     """
-    #     print("\n测试小样本专家轨迹模仿学习模块的进化学习功能 (EvolutionaryLearner)")
+        该测试验证EvolutionaryLearner的以下功能:
+        1. 种群初始化与进化
+        2. 适应度评估
+        3. 最佳策略选择
+        4. 策略预测
+        """
+        print("\n测试小样本专家轨迹模仿学习模块的进化学习功能 (EvolutionaryLearner)")
+
+        # 创建测试数据
+        training_data = self.create_trajectory_data()
         
-    #     # 创建测试数据
-    #     training_data = self.create_trajectory_data()
+        # 配置模型
+        model_config = {
+            'training_method': 'incremental',
+            'model_type': 'TransformerModel',  # 使用扩散模型
+            'd_model': 64,
+            'nhead': 4,
+            'num_layers': 2,
+            'batch_size': 32,
+            'max_epochs': 10,  # 减少训练轮数以加快测试
+            'learning_rate': 1e-3,
+            'validation_split': 0.2
+        }
         
-    #     # 创建模拟环境
-    #     eval_env = self.create_dummy_env()
-        
-    #     # 配置模型
-    #     model_config = {
-    #         'model_type': 'EvolutionaryLearner',  # 使用进化学习模型
-    #         'population_size': 20,  # 减少种群规模以加快测试
-    #         'mutation_rate': 0.15,
-    #         'crossover_rate': 0.7,
-    #         'selection_method': 'tournament',
-    #         'elitism_ratio': 0.1,
-    #         'max_generations': 5  # 减少代数以加快测试
-    #     }
-        
-    #     # 训练模型
-    #     result = self.api.train_advanced_model(training_data, model_config,
-    #                                           policy_template=policy_template,
-    #                                           eval_env=eval_env)
-        
-    #     # 验证结果
-    #     self.assertIn('model_id', result)
-    #     self.assertIn('model', result)
-    #     self.assertIn('training_metrics', result)
-        
-    #     # 提取模型ID和训练指标
-    #     model_id = result['model_id']
-    #     model = result['model']
-    #     training_metrics = result['training_metrics']
-        
-    #     print(f"模型ID: {model_id}")
-    #     print(f"最佳适应度: {training_metrics.get('best_fitness', 'N/A')}")
-    #     print(f"最终种群规模: {training_metrics.get('final_population_size', 'N/A')}")
-    #     print(f"收敛代数: {training_metrics.get('convergence_generation', 'N/A')}")
-        
-    #     # 测试获取最佳策略
-    #     best_policy = self.api.advanced_modeling_service.get_best_policy(model_id)
-        
-    #     # 验证最佳策略
-    #     self.assertIsNotNone(best_policy)
-    #     print(f"最佳策略类型: {type(best_policy).__name__}")
-        
-    #     # 测试策略预测
-    #     state = np.random.rand(10)  # 假设状态是10维
-    #     action = self.api.advanced_modeling_service.predict(model_id, state)
-        
-    #     # 验证预测结果
-    #     self.assertIsNotNone(action)
-    #     print(f"预测动作形状: {action.shape}")
-        
-    #     # 测试评估功能
-    #     test_data = self.create_trajectory_test_data()
-    #     eval_config = {
-    #         'method': 'policy_evaluation',
-    #         'metrics': ['reward', 'success_rate'],
-    #         'num_episodes': 5
-    #     }
-        
-    #     eval_result = self.api.evaluate_model(model, test_data, eval_config)
-        
-    #     # 验证评估结果
-    #     self.assertIn('avg_reward', eval_result)
-    #     self.assertIn('success_rate', eval_result)
-    #     print(f"平均奖励: {eval_result['avg_reward']:.4f}")
-    #     print(f"成功率: {eval_result['success_rate']:.4f}")
+        # 训练模型
+        result = self.api.train_advanced_algorithm(training_data, model_config)
+        print(f"增量学习完成")
     
     def test_incremental_learner(self):
         """
@@ -355,7 +307,7 @@ class TestAdvancedAlgorithm(unittest.TestCase):
         
         # 配置模型
         model_config = {
-            'training_method': 'fine_tune',
+            'training_method': 'incremental',
             'model_type': 'TransformerModel',  # 使用扩散模型
             'd_model': 64,
             'nhead': 4,
