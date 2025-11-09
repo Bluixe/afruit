@@ -214,7 +214,7 @@ class TransformerModel(nn.Module):
             encoded_states = states
         
         # 将状态、动作和奖励在特征维度上拼接
-        print(actions_one_hot.shape, rewards.shape, encoded_states.shape)
+        # print(actions_one_hot.shape, rewards.shape, encoded_states.shape)
         stacked_inputs = torch.cat([
             actions_one_hot,
             rewards,
