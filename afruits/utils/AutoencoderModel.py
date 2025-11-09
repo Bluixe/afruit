@@ -433,6 +433,7 @@ class AutoencoderTrainer:
             dict: 训练历史
         """
         # 优化器
+        self.model.to(self.device)
         optimizer = torch.optim.Adam(self.parameters(), lr=learning_rate)
         
         # 训练历史
