@@ -204,8 +204,28 @@ class EvolutionaryLearner:
             
             while not done:
                 # 使用Transformer模型预测动作
-                action_probs = policy.predict(torch.FloatTensor(obs).unsqueeze(0).to(self.device))
-                action = torch.argmax(action_probs, dim=-1).item()
+                # 确保输入是正确的形状
+                if isinstance(obs, np.ndarray):
+                    obs_tensor = torch.FloatTensor(obs).to(self.device)
+                else:
+                    obs_tensor = obs.to(self.device)
+                
+                # 根据输入维度调整
+                if len(obs_tensor.shape) == 1:  # 如果是一维向量，添加批次维度
+                    obs_tensor = obs_tensor.unsqueeze(0)
+                
+                # 创建一个虚拟的动作序列（全零）
+                batch_size = obs_tensor.shape[0]
+                dummy_actions = torch.zeros(batch_size, 1, dtype=torch.long).to(self.device)
+                
+                # 创建批次
+                batch = [obs_tensor, dummy_actions]
+                
+                # 使用模型预测
+                with torch.no_grad():
+                    outputs = policy.model(batch)
+                    action_probs = torch.softmax(outputs[:, -1, :], dim=-1)
+                    action = torch.argmax(action_probs, dim=-1).item()
                 
                 # 执行动作
                 obs, reward, done, info = eval_env.step(action)
