@@ -245,7 +245,6 @@ class ImitationLearningService:
         
         diffusion_steps = model_config.get('diffusion_steps', 1000)
         noise_schedule = model_config.get('noise_schedule', 'cosine')
-        seq_length = model_config.get('seq_length', 120)
         dropout = model_config.get('dropout', 0.2)
         im_embd = model_config.get('im_embd', 128)
         
@@ -253,7 +252,6 @@ class ImitationLearningService:
         model = DiffusionTrajGenerator(
             diffusion_steps=diffusion_steps,
             noise_schedule=noise_schedule,
-            seq_length=seq_length,
             dropout=dropout,
             im_embd=im_embd
         )

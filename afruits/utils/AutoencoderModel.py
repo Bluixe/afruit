@@ -354,7 +354,6 @@ class AutoencoderTrainer:
     def __init__(self,
                  encoder_type="lstm",  # 编码器类型: "str"或"transformer"
                  latent_dim=32,       # 隐空间维度
-                 seq_length=100,      # 序列长度
                  kl_weight=0.001,     # 正则化权重
                  dropout_rate=0.2):    # 动作空间维度（用于one-hot编码）
         """
@@ -371,7 +370,6 @@ class AutoencoderTrainer:
         
         self.encoder_type = encoder_type
         self.latent_dim = latent_dim
-        self.seq_length = seq_length
         self.kl_weight = kl_weight
         self.dropout_rate = dropout_rate
         self.device = device
@@ -379,7 +377,6 @@ class AutoencoderTrainer:
         self.model = AutoencoderModel(
             encoder_type=self.encoder_type,
             latent_dim=self.latent_dim,
-            seq_length=self.seq_length,
             kl_weight=self.kl_weight,
             dropout_rate=self.dropout_rate,
         ).to(self.device)
@@ -387,10 +384,8 @@ class AutoencoderTrainer:
         self.config_to_save = {
             'encoder_type': self.encoder_type,
             'latent_dim': self.latent_dim,
-            'seq_length': self.seq_length,
             'kl_weight': self.kl_weight,
             'dropout_rate': self.dropout_rate,
-            'action_dim': self.action_dim
         }
 
     def build_model(self, input_dim, action_dim, seq_length):
