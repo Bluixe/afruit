@@ -41,9 +41,8 @@ class TestVisualization(unittest.TestCase):
     
     def tearDown(self):
         """测试后的清理工作"""
-        # 清理测试生成的文件
-        if os.path.exists(self.test_save_dir):
-            shutil.rmtree(self.test_save_dir)
+        # 不删除生成的可视化文件，以便查看测试结果
+        pass
     
     #---------- 辅助方法 ----------#
     
