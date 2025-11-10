@@ -56,23 +56,23 @@ class TestVisualization(unittest.TestCase):
         return {
             'x': x,
             'y': {
-                '正弦': y1,
-                '余弦': y2,
-                '正余弦乘积': y3
+                'Sine': y1,
+                'Cosine': y2,
+                'Sine*Cosine': y3
             }
         }
     
     def create_bar_data(self):
         """创建柱状图测试数据"""
-        categories = ['类别A', '类别B', '类别C', '类别D', '类别E']
+        categories = ['Category A', 'Category B', 'Category C', 'Category D', 'Category E']
         values1 = np.random.rand(5) * 10
         values2 = np.random.rand(5) * 10
         
         return {
             'x': categories,
             'y': {
-                '组1': values1,
-                '组2': values2
+                'Group 1': values1,
+                'Group 2': values2
             }
         }
     
@@ -88,14 +88,14 @@ class TestVisualization(unittest.TestCase):
             'y': y,
             'colors': colors,
             'sizes': sizes,
-            'labels': [f'点{i}' for i in range(10)] + [None] * (n_samples - 10)
+            'labels': [f'Point {i}' for i in range(10)] + [None] * (n_samples - 10)
         }
     
     def create_heatmap_data(self):
         """创建热力图测试数据"""
         matrix = np.random.rand(8, 10)
-        xlabels = [f'特征{i}' for i in range(10)]
-        ylabels = [f'样本{i}' for i in range(8)]
+        xlabels = [f'Feature {i}' for i in range(10)]
+        ylabels = [f'Sample {i}' for i in range(8)]
         
         return {
             'matrix': matrix,
@@ -131,8 +131,8 @@ class TestVisualization(unittest.TestCase):
         
         return {
             'trajectories': {
-                '轨迹1': list(zip(x1, y1)),
-                '轨迹2': list(zip(x2, y2))
+                'Trajectory 1': list(zip(x1, y1)),
+                'Trajectory 2': list(zip(x2, y2))
             }
         }
     
@@ -145,30 +145,30 @@ class TestVisualization(unittest.TestCase):
         
         return {
             'distributions': {
-                '正态分布(0,1)': dist1,
-                '正态分布(3,1.5)': dist2,
-                '指数分布(2)': dist3
+                'Normal(0,1)': dist1,
+                'Normal(3,1.5)': dist2,
+                'Exponential(2)': dist3
             }
         }
     
     def create_comparison_data(self):
         """创建比较图测试数据"""
-        models = ['模型A', '模型B', '模型C']
+        models = ['Model A', 'Model B', 'Model C']
         metrics = {
-            '准确率': {
-                '模型A': 0.85,
-                '模型B': 0.82,
-                '模型C': 0.88
+            'Accuracy': {
+                'Model A': 0.85,
+                'Model B': 0.82,
+                'Model C': 0.88
             },
-            '召回率': {
-                '模型A': 0.76,
-                '模型B': 0.81,
-                '模型C': 0.79
+            'Recall': {
+                'Model A': 0.76,
+                'Model B': 0.81,
+                'Model C': 0.79
             },
-            'F1分数': {
-                '模型A': 0.80,
-                '模型B': 0.81,
-                '模型C': 0.83
+            'F1 Score': {
+                'Model A': 0.80,
+                'Model B': 0.81,
+                'Model C': 0.83
             }
         }
         
@@ -195,7 +195,7 @@ class TestVisualization(unittest.TestCase):
     
     def test_line_plot(self):
         """测试折线图功能"""
-        print("\n测试折线图功能")
+        print("\nTesting Line Plot")
         
         # 创建测试数据
         data = self.create_line_data()
@@ -203,9 +203,9 @@ class TestVisualization(unittest.TestCase):
         # 配置可视化
         vis_config = {
             'type': 'line',
-            'title': '测试折线图',
-            'xlabel': 'X轴',
-            'ylabel': 'Y轴',
+            'title': 'Test Line Plot',
+            'xlabel': 'X Axis',
+            'ylabel': 'Y Axis',
             'grid': True
         }
         
@@ -222,11 +222,11 @@ class TestVisualization(unittest.TestCase):
         save_path = result['save_paths'][0]
         self.assertTrue(os.path.exists(save_path))
         
-        print(f"折线图已保存: {save_path}")
+        print(f"Line plot saved: {save_path}")
     
     def test_bar_plot(self):
         """测试柱状图功能"""
-        print("\n测试柱状图功能")
+        print("\nTesting Bar Plot")
         
         # 创建测试数据
         data = self.create_bar_data()
@@ -234,9 +234,9 @@ class TestVisualization(unittest.TestCase):
         # 配置可视化
         vis_config = {
             'type': 'bar',
-            'title': '测试柱状图',
-            'xlabel': '类别',
-            'ylabel': '数值'
+            'title': 'Test Bar Plot',
+            'xlabel': 'Category',
+            'ylabel': 'Value'
         }
         
         # 执行可视化
@@ -252,11 +252,11 @@ class TestVisualization(unittest.TestCase):
         save_path = result['save_paths'][0]
         self.assertTrue(os.path.exists(save_path))
         
-        print(f"柱状图已保存: {save_path}")
+        print(f"Bar plot saved: {save_path}")
     
     def test_scatter_plot(self):
         """测试散点图功能"""
-        print("\n测试散点图功能")
+        print("\nTesting Scatter Plot")
         
         # 创建测试数据
         data = self.create_scatter_data()
@@ -264,10 +264,10 @@ class TestVisualization(unittest.TestCase):
         # 配置可视化
         vis_config = {
             'type': 'scatter',
-            'title': '测试散点图',
-            'xlabel': 'X轴',
-            'ylabel': 'Y轴',
-            'color_label': '颜色值'
+            'title': 'Test Scatter Plot',
+            'xlabel': 'X Axis',
+            'ylabel': 'Y Axis',
+            'color_label': 'Color Value'
         }
         
         # 执行可视化
@@ -283,11 +283,11 @@ class TestVisualization(unittest.TestCase):
         save_path = result['save_paths'][0]
         self.assertTrue(os.path.exists(save_path))
         
-        print(f"散点图已保存: {save_path}")
+        print(f"Scatter plot saved: {save_path}")
     
     def test_heatmap_plot(self):
         """测试热力图功能"""
-        print("\n测试热力图功能")
+        print("\nTesting Heatmap")
         
         # 创建测试数据
         data = self.create_heatmap_data()
@@ -295,7 +295,7 @@ class TestVisualization(unittest.TestCase):
         # 配置可视化
         vis_config = {
             'type': 'heatmap',
-            'title': '测试热力图',
+            'title': 'Test Heatmap',
             'annot': True,
             'cmap': 'coolwarm'
         }
@@ -313,11 +313,11 @@ class TestVisualization(unittest.TestCase):
         save_path = result['save_paths'][0]
         self.assertTrue(os.path.exists(save_path))
         
-        print(f"热力图已保存: {save_path}")
+        print(f"Heatmap saved: {save_path}")
     
     def test_3d_plot(self):
         """测试3D图功能"""
-        print("\n测试3D图功能")
+        print("\nTesting 3D Plot")
         
         # 创建测试数据
         data = self.create_3d_data()
@@ -325,10 +325,10 @@ class TestVisualization(unittest.TestCase):
         # 配置可视化
         vis_config = {
             'type': '3d',
-            'title': '测试3D图',
-            'xlabel': 'X轴',
-            'ylabel': 'Y轴',
-            'zlabel': 'Z轴',
+            'title': 'Test 3D Plot',
+            'xlabel': 'X Axis',
+            'ylabel': 'Y Axis',
+            'zlabel': 'Z Axis',
             'plot_type': 'scatter'
         }
         
@@ -345,11 +345,11 @@ class TestVisualization(unittest.TestCase):
         save_path = result['save_paths'][0]
         self.assertTrue(os.path.exists(save_path))
         
-        print(f"3D图已保存: {save_path}")
+        print(f"3D plot saved: {save_path}")
     
     def test_trajectory_plot(self):
         """测试轨迹图功能"""
-        print("\n测试轨迹图功能")
+        print("\nTesting Trajectory Plot")
         
         # 创建测试数据
         data = self.create_trajectory_data()
@@ -357,9 +357,9 @@ class TestVisualization(unittest.TestCase):
         # 配置可视化
         vis_config = {
             'type': 'trajectory',
-            'title': '测试轨迹图',
-            'xlabel': 'X坐标',
-            'ylabel': 'Y坐标',
+            'title': 'Test Trajectory Plot',
+            'xlabel': 'X Coordinate',
+            'ylabel': 'Y Coordinate',
             'legend': True,
             'grid': True
         }
@@ -377,11 +377,11 @@ class TestVisualization(unittest.TestCase):
         save_path = result['save_paths'][0]
         self.assertTrue(os.path.exists(save_path))
         
-        print(f"轨迹图已保存: {save_path}")
+        print(f"Trajectory plot saved: {save_path}")
     
     def test_distribution_plot(self):
         """测试分布图功能"""
-        print("\n测试分布图功能")
+        print("\nTesting Distribution Plot")
         
         # 创建测试数据
         data = self.create_distribution_data()
@@ -389,9 +389,9 @@ class TestVisualization(unittest.TestCase):
         # 配置可视化
         vis_config = {
             'type': 'distribution',
-            'title': '测试分布图',
-            'xlabel': '数值',
-            'ylabel': '频率'
+            'title': 'Test Distribution Plot',
+            'xlabel': 'Value',
+            'ylabel': 'Frequency'
         }
         
         # 执行可视化
@@ -407,11 +407,11 @@ class TestVisualization(unittest.TestCase):
         save_path = result['save_paths'][0]
         self.assertTrue(os.path.exists(save_path))
         
-        print(f"分布图已保存: {save_path}")
+        print(f"Distribution plot saved: {save_path}")
     
     def test_comparison_plot(self):
         """测试比较图功能"""
-        print("\n测试比较图功能")
+        print("\nTesting Comparison Plot")
         
         # 创建测试数据
         data = self.create_comparison_data()
@@ -419,7 +419,7 @@ class TestVisualization(unittest.TestCase):
         # 配置可视化
         vis_config = {
             'type': 'comparison',
-            'title': '模型性能比较'
+            'title': 'Model Performance Comparison'
         }
         
         # 执行可视化
@@ -435,11 +435,11 @@ class TestVisualization(unittest.TestCase):
         save_path = result['save_paths'][0]
         self.assertTrue(os.path.exists(save_path))
         
-        print(f"比较图已保存: {save_path}")
+        print(f"Comparison plot saved: {save_path}")
     
     def test_embedding_plot(self):
         """测试嵌入图功能"""
-        print("\n测试嵌入图功能")
+        print("\nTesting Embedding Plot")
         
         # 创建测试数据
         data = self.create_embedding_data()
@@ -447,7 +447,7 @@ class TestVisualization(unittest.TestCase):
         # 配置可视化 - 使用PCA
         vis_config_pca = {
             'type': 'embedding',
-            'title': '测试PCA嵌入图',
+            'title': 'Test PCA Embedding',
             'method': 'pca'
         }
         
@@ -464,12 +464,12 @@ class TestVisualization(unittest.TestCase):
         save_path_pca = result_pca['save_paths'][0]
         self.assertTrue(os.path.exists(save_path_pca))
         
-        print(f"PCA嵌入图已保存: {save_path_pca}")
+        print(f"PCA embedding plot saved: {save_path_pca}")
         
         # 配置可视化 - 使用t-SNE
         vis_config_tsne = {
             'type': 'embedding',
-            'title': '测试t-SNE嵌入图',
+            'title': 'Test t-SNE Embedding',
             'method': 'tsne'
         }
         
@@ -486,11 +486,11 @@ class TestVisualization(unittest.TestCase):
         save_path_tsne = result_tsne['save_paths'][0]
         self.assertTrue(os.path.exists(save_path_tsne))
         
-        print(f"t-SNE嵌入图已保存: {save_path_tsne}")
+        print(f"t-SNE embedding plot saved: {save_path_tsne}")
     
     def test_invalid_type(self):
         """测试无效的可视化类型"""
-        print("\n测试无效的可视化类型")
+        print("\nTesting Invalid Visualization Type")
         
         # 创建测试数据
         data = self.create_line_data()
@@ -498,7 +498,7 @@ class TestVisualization(unittest.TestCase):
         # 配置可视化
         vis_config = {
             'type': 'invalid_type',  # 无效的类型
-            'title': '测试无效类型'
+            'title': 'Test Invalid Type'
         }
         
         # 执行可视化 - 应该默认使用折线图
@@ -514,7 +514,7 @@ class TestVisualization(unittest.TestCase):
         save_path = result['save_paths'][0]
         self.assertTrue(os.path.exists(save_path))
         
-        print(f"默认折线图已保存: {save_path}")
+        print(f"Default line plot saved: {save_path}")
 
 
 if __name__ == "__main__":
