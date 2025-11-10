@@ -7,12 +7,6 @@ pip install -r requirements.txt
 
 pip install -e .
 
-cd stable-baselines3
+cd afruits/stable-baselines3
 
 pip install -e .
-
-cd ../tianshou
-
-pip install -e .
-
-cd ..

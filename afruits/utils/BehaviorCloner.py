@@ -88,7 +88,7 @@ class BehaviorCloner:
             2. 自动填充缺失值
             3. 标准化特征到[-1, 1]区间
         """
-        expert_states, expert_actions = self.dataloader_util.load_bc_gail_data(expert_trajectories)
+        expert_states, expert_actions = self.dataloader_util.load_bc_gail_data(raw_trajectories)
         return expert_states, expert_actions
     
     def extract_features(self, state_data: np.ndarray) -> Dict:

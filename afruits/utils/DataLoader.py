@@ -78,6 +78,7 @@ class DataLoaderUtil:
         """
         if seq_length <= 0:
             seq_length = 10000
+        print(type(data))
         if type(data) == list:
             # list of dict {"states":..., "actions":...}
             # 将多个轨迹合并为一个整体
