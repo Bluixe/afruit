@@ -480,8 +480,8 @@ class ImitationLearningService:
             replay_strategy=replay_strategy
         )
         
-        # 设置模型
-        incremental_learner.setup_model()
+        # # 设置模型
+        # incremental_learner.setup_model()
         
         # 准备数据
         data_loader = incremental_learner.prepare_data(data, batch_size=batch_size)

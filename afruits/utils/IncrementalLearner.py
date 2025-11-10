@@ -85,7 +85,7 @@ class IncrementalLearner:
                 print(f"加载预训练权重失败: {str(e)}")
         
         # 设置优化器
-        self._setup_optimizer()
+        # self._setup_optimizer()
         
         return self.model
     
@@ -97,7 +97,7 @@ class IncrementalLearner:
         optimizer_type = self.optimizer_config.get('type', 'Adam')
         
         # 使用统一的学习率
-        params = [p for p in self.model.parameters() if p.requires_grad]
+        params = [p for p in self.model.model.parameters() if p.requires_grad]
         
         # 创建优化器
         if optimizer_type == 'Adam':
