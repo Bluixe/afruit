@@ -1,44 +1,63 @@
-# 软件研制阶段说明文档
+### 软件研制过程说明（含研制思路）
 
-## 接口层
-### afruits/core/api.py
-AlgorithmAPI类提供统一的接口，包含以下方法：
-- __init__: 初始化API，加载配置和模型
-- load_data: 支持json/csv/npy格式的数据加载
-- preprocess_data: 实现数据预处理（异常值处理/时间对齐/标准化）
-- train_game_model: 执行小样本博弈模型训练
-- train_imitation_model: 执行专家轨迹模仿学习模型训练
-- evaluate_model: 支持离线评估和多指标评估
-- visualize_results: 生成可视化结果
-- save_model: 支持PyTorch/ONNX格式模型保存
-- load_model: 加载预训练模型
-- get_available_models: 获取所有可用模型列表
+#### 背景与目标
+项目围绕小样本博弈建模与专家轨迹模仿学习两大核心模块构建，旨在实现：
+1. **小样本博弈建模**：在有限样本下构建博弈策略模型
+2. **专家轨迹模仿**：通过生成模型学习专家行为轨迹模式
+3. **策略优化闭环**：支持策略评估-优化-验证全流程
 
-### afruits/main.py
-主程序实现图形界面，包含：
-- MatplotlibCanvas: 嵌入式Matplotlib画布
-- TrainingThread: 多线程训练管理
-- MainWindow: 主窗口包含数据管理、模型训练、评估、可视化四个选项卡
-- create_trajectory_data: 生成示例轨迹数据
-- 数据加载和预处理回调函数
-- 模型训练控制和结果可视化
+#### 架构设计思路
+采用三层架构保障系统可维护性与扩展性：
+1. **接口层**
+   - 通过`core/api.py`提供统一API入口
+   - 实现数据加载、模型训练、评估可视化等核心功能
+   - 采用模块化设计分离用户交互与业务逻辑
 
-## 服务层
-### afruits/core/services/game_modeling_service.py
-GameModelingService实现博弈建模服务：
-- train_model: 根据模型类型分发训练请求
-- _train_behavior_cloner: 行为克隆模型训练
-- _train_offline_rl: 离线强化学习训练
-- _train_offline_fsp: 自对弈训练
-- _train_adversial_imitation_learner: 对抗模仿学习
+2. **服务层**
+   - **博弈建模服务**：实现策略训练/评估功能
+     - 支持离线RL、对抗学习等算法
+     - 提供策略评估指标计算
+   - **模仿学习服务**：处理轨迹生成任务
+     - 实现扩散模型/Transformer等生成器
+     - 支持进化学习/增量学习等训练方式
+   - **可视化服务**：提供策略/轨迹可视化组件
+     - 支持轨迹对比/特征降维展示
 
-### afruits/core/services/imitation_learning_service.py
-ImitationLearningService处理专家轨迹模仿：
-- train_model: 根据模型类型分发训练任务
-- _train_standard: 标准训练方法
-- _train_autoencoder: 自编码器训练
-- _train_transformer: Transformer模型训练
-- _train_diffusion: 扩散模型训练
-- _train_vae: 变分自编码器训练
-- _train_evolutionary: 进化学习方法
-- _train_incremental: 墽드
+3. **功能层**
+   - 算法模块采用分层设计：
+     - **基础层**：`BehaviorCloner`等基础学习器
+     - **生成层**：`DiffusionTrajGenerator`等轨迹生成器
+     - **优化层**：`EvolutionaryLearner`等高级优化器
+
+#### 关键技术实现
+1. **小样本优化**
+   - 数据增强：轨迹分段/噪声注入
+   - 迁移学习：预训练模型微调机制
+   - 元学习：`IncrementalLearner`支持持续学习
+
+2. **轨迹生成模型**
+   - 多模型支持：
+     - 扩散模型处理连续轨迹
+     - Transformer处理序列数据
+     - VAE保证生成多样性
+   - 物理约束处理：
+     - 运动学约束检测
+     - 轨迹平滑优化
+
+3. **评估体系**
+   - 多维度评估器：
+     - 离线评估指标（IS/PD）
+     - 策略鲁棒性测试
+     - 多维度对比分析
+
+#### 创新点
+1. **生成模型融合**：扩散模型与传统生成模型结合
+2. **增量学习框架**：支持小样本持续优化
+3. **模块化训练器**：通过`FineTuneManager`统一微调接口
+
+#### 成果与展望
+系统实现从数据到策略的端到端处理，支持：
+- 小样本场景下的快速策略迭代
+- 多模式轨迹生成
+- 可视化策略验证
+未来计划扩展多智能体博弈支持及在线学习能力。
