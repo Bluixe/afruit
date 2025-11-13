@@ -9,6 +9,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # 导入API
 from afruits.core.api import AlgorithmAPI
+from afruits.utils.DataPreprocessor import DataPreprocessor  # 导入数据预处理器
 
 class TestAPIBasic(unittest.TestCase):
     """
@@ -21,6 +22,8 @@ class TestAPIBasic(unittest.TestCase):
         """测试前的准备工作"""
         # 初始化API
         self.api = AlgorithmAPI(log_level="INFO")
+        # 初始化数据预处理器
+        self.preprocessor = DataPreprocessor()
         
     def test_api_initialization(self):
         """测试API初始化"""
@@ -76,6 +79,87 @@ class TestAPIBasic(unittest.TestCase):
             print("轨迹预处理测试通过")
         except Exception as e:
             self.fail(f"轨迹预处理失败: {str(e)}")
+            
+    def test_training_data_preprocessing(self):
+        """测试训练数据预处理功能"""
+        print("\n测试训练数据预处理功能")
+        
+        # 创建符合新格式的轨迹数据
+        raw_data = {
+            "trajectories": [
+                {
+                    "states": np.random.rand(5, 4),  # 5步轨迹，4维状态
+                    "actions": np.random.rand(5, 2), # 5步轨迹，2维动作
+                    "rewards": np.random.rand(5),
+                    "next_states": np.random.rand(5, 4),
+                    "dones": np.array([0,0,0,0,1]),
+                    "infos": [{}, {}, {}, {}, {}],
+                    "opponent_actions": np.random.rand(5, 2)
+                },
+                {
+                    "states": np.random.rand(3, 4),  # 3步轨迹，4维状态
+                    "actions": np.random.rand(3, 2), # 3步轨迹，2维动作
+                    "rewards": np.random.rand(3),
+                    "next_states": np.random.rand(3, 4),
+                    "dones": np.array([0,0,1]),
+                    "infos": [{}, {}, {}],
+                    "opponent_actions": np.random.rand(3, 2)
+                }
+            ],
+            "state_dim": (4,),
+            "action_dim": 2
+        }
+        
+        # 测试不同模型类型的数据预处理
+        model_types = [
+            "AutoencoderModel", "TransformerModel", "DiffusionTrajGenerator", "VAETrajGenerator",
+            "OfflineRLearner", "OfflineFSPLearner", "BehaviorCloner", "AdversarialImitationLearner"
+        ]
+        
+        for model_type in model_types:
+            print(f"测试模型类型: {model_type}")
+            try:
+                # 预处理训练数据
+                processed_data = self.preprocessor.preprocess_for_training(raw_data, model_type)
+                
+                # 验证基本数据结构
+                self.assertIn("data", processed_data)
+                self.assertIn("state_dim", processed_data)
+                self.assertIn("action_dim", processed_data)
+                self.assertEqual(processed_data["state_dim"], (4,))
+                self.assertEqual(processed_data["action_dim"], 2)
+                
+                # 验证特定模型类型的数据格式
+                if model_type in ["AutoencoderModel", "TransformerModel", "DiffusionTrajGenerator", "VAETrajGenerator"]:
+                    self.assertIsInstance(processed_data["data"], list)
+                    self.assertEqual(len(processed_data["data"]), 2)
+                    self.assertIn("traj_length", processed_data)
+                    
+                    # 验证轨迹长度
+                    self.assertEqual(len(processed_data["data"][0]['states']), 5)
+                    self.assertEqual(len(processed_data["data"][1]['states']), 3)
+                else:
+                    self.assertIsInstance(processed_data["data"], dict)
+                    self.assertEqual(len(processed_data["data"]), 2)
+                    
+                    # 验证轨迹字段
+                    traj0 = processed_data["data"]["traj_0"]
+                    self.assertIn('states', traj0)
+                    self.assertIn('actions', traj0)
+                    
+                    # 验证模型特定字段
+                    if model_type == 'OfflineRLearner':
+                        self.assertIn('rewards', traj0)
+                        self.assertIn('next_states', traj0)
+                    elif model_type == 'OfflineFSPLearner':
+                        self.assertIn('opponent_actions', traj0)
+                    
+                print(f"  {model_type} 数据格式验证通过")
+                
+            except Exception as e:
+                self.fail(f"{model_type} 预处理失败: {str(e)}")
+        
+        print("训练数据预处理测试通过")
         
     def create_simple_data(self):
         """创建简单的测试数据"""

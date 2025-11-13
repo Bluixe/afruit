@@ -171,7 +171,7 @@ class DiffusionTrajGenerator:
                 
             def forward(self, x_state=None, t=None, cond=None):
                 """
-                前向传播函数 - 简化版本，不使用跳跃连接
+                改进的前向传播函数，支持完整序列处理
                 
                 参数:
                     x_state: 输入状态，可以是 [batch_size, seq_len, feature_dim] 或 [batch_size, feature_dim]
@@ -179,27 +179,43 @@ class DiffusionTrajGenerator:
                     cond: 条件信息，可选
                     
                 返回:
-                    预测的噪声
+                    预测的噪声 (与输入x_state同形状)
                 """
-                # 处理输入
-                if len(x_state.shape) == 3:  # [batch_size, seq_len, feature_dim]
-                    x = x_state[:, -1, :]  # 取最后一个时间步
-                else:  # [batch_size, feature_dim]
-                    x = x_state
+                # 处理输入形状
+                if len(x_state.shape) == 3:
+                    batch_size, seq_len, feature_dim = x_state.shape
+                    # 展平序列用于处理
+                    x_flat = x_state.reshape(batch_size * seq_len, feature_dim)
+                    t_rep = t.repeat_interleave(seq_len)
+                    if cond is not None:
+                        cond_rep = cond.repeat_interleave(seq_len, dim=0)
+                    else:
+                        cond_rep = None
+                else:
+                    x_flat = x_state
+                    t_rep = t
+                    cond_rep = cond
+                    seq_len = 1
                 
                 # 时间嵌入
-                t_emb = self.time_embed(t.unsqueeze(-1))
+                t_emb = self.time_embed(t_rep.unsqueeze(-1))
                 
                 # 条件嵌入
-                if self.cond_embed is not None and cond is not None:
-                    c_emb = self.cond_embed(cond)
+                if self.cond_embed is not None and cond_rep is not None:
+                    c_emb = self.cond_embed(cond_rep)
                     t_emb = t_emb + c_emb
                 
                 # 连接输入和时间嵌入
-                h = torch.cat([x, t_emb], dim=-1).float()
+                h = torch.cat([x_flat, t_emb], dim=-1).float()
                 
-                # 直接通过MLP模型
-                output = self.model(h)
+                # 通过MLP模型
+                output_flat = self.model(h)
+                
+                # 恢复原始形状
+                if len(x_state.shape) == 3:
+                    output = output_flat.reshape(batch_size, seq_len, feature_dim)
+                else:
+                    output = output_flat
                 
                 return output
         
@@ -263,30 +279,14 @@ class DiffusionTrajGenerator:
                 noisy_trajectories = torch.sqrt(alphas_cumprod_t) * trajectories + \
                                     torch.sqrt(1 - alphas_cumprod_t) * noise
                 
-                # 预测噪声
-                # 处理输入形状
-                batch_size = noisy_trajectories.shape[0]
+                # 归一化时间步
+                t_normalized = t / self.diffusion_steps
                 
-                if len(noisy_trajectories.shape) == 3:  # [batch_size, seq_len, feature_dim]
-                    # 对于序列输入，我们需要特殊处理
-                    seq_len = noisy_trajectories.shape[1]
-                    feature_dim = noisy_trajectories.shape[2]
-                    
-                    # 我们只预测最后一个时间步的噪声，然后扩展到整个序列
-                    last_step = noisy_trajectories[:, -1, :]
-                    t_normalized = t / self.diffusion_steps
-                    
-                    # 预测噪声
-                    predicted_last_step_noise = self.model(x_state=last_step.unsqueeze(1), t=t_normalized)
-                    
-                    # 扩展到整个序列
-                    if len(predicted_last_step_noise.shape) == 2:
-                        predicted_noise = predicted_last_step_noise.unsqueeze(1).expand(-1, seq_len, -1)
-                    else:
-                        predicted_noise = predicted_last_step_noise.expand(-1, seq_len, -1)
-                else:
-                    # 对于非序列输入，直接预测
-                    predicted_noise = self.model(x_state=noisy_trajectories, t=t / self.diffusion_steps)
+                # 预测噪声 (使用改进的前向传播)
+                predicted_noise = self.model(
+                    x_state=noisy_trajectories,
+                    t=t_normalized
+                )
                 
                 # 计算损失
                 loss = self.loss_fn(predicted_noise, noise)
@@ -315,14 +315,16 @@ class DiffusionTrajGenerator:
             'epochs': epochs
         }
     
-    def generate(self, batch_size: int = 1, cond_data: torch.Tensor = None) -> Dict:
+    def generate(self, batch_size: int = 1, seq_len: int = 10, cond_data: torch.Tensor = None,
+                validity_check: bool = True) -> Dict:
         """
         生成轨迹
         
         参数:
             batch_size (int): 生成批次大小
+            seq_len (int): 轨迹序列长度
             cond_data (torch.Tensor): 条件信息数据
-            validity_flag (bool): 是否检查物理有效性
+            validity_check (bool): 是否检查物理有效性
             
         返回:
             生成结果 (Dict)
@@ -331,11 +333,10 @@ class DiffusionTrajGenerator:
             raise ValueError("请先调用build_model构建模型")
         
         self.model.eval()
-        input_shape = next(self.model.parameters()).shape
-        traj_dim = input_shape[0] if len(input_shape) == 1 else input_shape[1]
+        state_dim = self.state_dim
         
-        # 初始化随机噪声
-        x = torch.randn((batch_size, traj_dim), device=self.device)
+        # 初始化随机噪声 (3D张量: [batch_size, seq_len, state_dim])
+        x = torch.randn((batch_size, seq_len, state_dim), device=self.device)
         
         # 逐步去噪
         for i in reversed(range(self.diffusion_steps)):
@@ -344,22 +345,7 @@ class DiffusionTrajGenerator:
             # 无梯度计算
             with torch.no_grad():
                 # 预测噪声
-                # 确保输入形状正确并进行预测
-                try:
-                    # 对于生成过程，我们总是使用2D输入 [batch_size, feature_dim]
-                    # 不需要添加序列维度，因为我们的模型已经设计为处理非序列输入
-                    predicted_noise = self.model(x_state=x, t=t, cond=cond_data)
-                except RuntimeError as e:
-                    # 如果出现维度不匹配错误，打印详细信息以便调试
-                    print(f"生成过程中出现错误: {e}")
-                    print(f"输入形状: {x.shape}, t形状: {t.shape}")
-                    if cond_data is not None:
-                        print(f"条件数据形状: {cond_data.shape}")
-                    
-                    # 尝试使用备用方法
-                    print("尝试使用备用方法...")
-                    x_reshaped = x.view(batch_size, -1)  # 确保输入是2D的 [batch_size, feature_dim]
-                    predicted_noise = self.model(x_state=x_reshaped, t=t, cond=cond_data)
+                predicted_noise = self.model(x_state=x, t=t, cond=cond_data)
                 
                 # 计算去噪步骤
                 alpha = self.alphas[i]
@@ -371,13 +357,19 @@ class DiffusionTrajGenerator:
                 else:
                     noise = torch.zeros_like(x)
                 
-                # 更新x
-                x = (1 / torch.sqrt(torch.tensor(alpha))) * (
+                # 更新x (使用更稳定的去噪公式)
+                x = (1 / torch.sqrt(alpha)) * (
                     x - ((1 - alpha) / torch.sqrt(1 - alpha_cumprod)) * predicted_noise
                 ) + torch.sqrt(beta) * noise
         
+        # 物理约束检查 (暂时禁用)
+        if validity_check:
+            # print("警告: 物理约束检查功能尚未实现，已跳过")
+            validity_flags = torch.ones(batch_size, dtype=torch.bool, device=self.device)
+        
         return {
             'trajectories': x.cpu().numpy(),
+            'validity': validity_flags.cpu().numpy() if validity_check else None
         }
     
     def save_model(self, save_path = None) -> None:

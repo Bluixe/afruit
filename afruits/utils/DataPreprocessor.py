@@ -13,6 +13,7 @@ class DataPreprocessor:
     - 数据标准化：集成Z-score标准化与Min-Max归一化模式
     - 异常值检测：提供多种异常检测方法与滤波选择
     - 时间序列对齐：内置RMSE, DTW等量化评估指标
+    - 训练数据预处理：根据模型类型生成符合训练要求的数据格式
     """
     
     def __init__(self, target_freq: float = 1, norm_method: str = "zscore", filter_type: str = "kalman"):
@@ -320,3 +321,97 @@ class DataPreprocessor:
                 normalized_data[key] = values
         
         return normalized_data
+
+    def preprocess_for_training(self, raw_data: Dict, model_type: str) -> Dict:
+        """
+        根据训练模型类型转换原始轨迹数据为所需格式
+        
+        参数:
+            raw_data (Dict): 原始输入数据字典，格式如下:
+                {
+                    "trajectories": [
+                        {
+                            "states": np.array([t0_state, t1_state, ...]),  # 状态序列
+                            "actions": np.array([t0_action, t1_action, ...]), # 动作序列
+                            "rewards": np.array([t0_reward, t1_reward, ...]), # 奖励序列(可选)
+                            "next_states": np.array([t0_next, t1_next, ...]), # 下一状态(可选)
+                            "dones": np.array([t0_done, t1_done, ...]),       # 终止标志(可选)
+                            "infos": [t0_info, t1_info, ...],                # 额外信息(可选)
+                            "opponent_actions": np.array([t0_opp, t1_opp, ...]) # 对手动作(可选)
+                        },
+                        ... # 更多轨迹
+                    ],
+                    "state_dim": tuple,  # 状态维度
+                    "action_dim": int    # 动作维度
+                }
+            model_type (str): 模型类型
+            
+        返回值:
+            Dict: 符合训练输入格式的数据
+        """
+        # 提取原始轨迹和维度信息
+        trajectories = raw_data["trajectories"]
+        state_dim = raw_data["state_dim"]
+        action_dim = raw_data["action_dim"]
+        
+        if model_type in ["AutoencoderModel", "TransformerModel", "DiffusionTrajGenerator", "VAETrajGenerator"]:
+            # 转换格式：轨迹列表
+            processed_trajs = []
+            for traj in trajectories:
+                processed_trajs.append({
+                    'states': traj['states'],
+                    'actions': traj['actions']
+                })
+            
+            return {
+                "data": processed_trajs,
+                "state_dim": state_dim,
+                "action_dim": action_dim,
+                "traj_length": len(trajectories[0]['states']) if trajectories else 0
+            }
+            
+        elif model_type in ["OfflineRLearner", "OfflineFSPLearner", "BehaviorCloner", "AdversarialImitationLearner"]:
+            # 转换格式：轨迹字典
+            processed_trajs = {}
+            for i, traj in enumerate(trajectories):
+                traj_id = f"traj_{i}"
+                
+                # 基础字段
+                processed_traj = {
+                    'states': traj['states'],
+                    'actions': traj['actions']
+                }
+                
+                # 根据模型类型添加额外字段
+                if model_type == 'OfflineRLearner':
+                    processed_traj.update({
+                        'rewards': traj.get('rewards', np.zeros(len(traj['states']))),
+                        'next_states': traj.get('next_states', np.zeros_like(traj['states'])),
+                        'dones': traj.get('dones', np.zeros(len(traj['states']))),
+                        'infos': traj.get('infos', [{} for _ in range(len(traj['states']))])
+                    })
+                elif model_type == 'OfflineFSPLearner':
+                    processed_traj.update({
+                        'opponent_actions': traj.get('opponent_actions', np.zeros(len(traj['actions']))),
+                        'rewards': traj.get('rewards', np.zeros(len(traj['states']))),
+                        'next_states': traj.get('next_states', np.zeros_like(traj['states'])),
+                        'dones': traj.get('dones', np.zeros(len(traj['states']))),
+                        'infos': traj.get('infos', [{} for _ in range(len(traj['states']))])
+                    })
+                else:
+                    processed_traj.update({
+                        'rewards': traj.get('rewards', np.zeros(len(traj['states']))),
+                        'dones': traj.get('dones', np.zeros(len(traj['states']))),
+                        'infos': traj.get('infos', [{} for _ in range(len(traj['states']))])
+                    })
+                
+                processed_trajs[traj_id] = processed_traj
+                    
+            return {
+                "data": processed_trajs,
+                "state_dim": state_dim,
+                "action_dim": action_dim
+            }
+            
+        else:
+            raise ValueError(f"Unsupported model type: {model_type}")

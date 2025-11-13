@@ -107,6 +107,7 @@ class MainWindow(QMainWindow):
         self.test_data = None
         self.current_model = None
         self.current_model_id = None
+        self.training_result = None  # 用于存储训练结果，供可视化使用
         self.available_models = self.api.get_available_models()
         
         # 更新模型下拉框
@@ -588,6 +589,45 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage("数据预处理完成")
             logger.info("数据预处理完成")
             
+            # 分割数据为训练集和测试集 (80%训练, 20%测试)
+            if self.processed_data and "trajectories" in self.processed_data:
+                import json
+                import os
+                import numpy as np
+                
+                trajectories = self.processed_data["trajectories"]
+                np.random.shuffle(trajectories)
+                split_index = int(0.8 * len(trajectories))
+                train_trajectories = trajectories[:split_index]
+                test_trajectories = trajectories[split_index:]
+                
+                # 保存训练集和测试集
+                data_dir = "data"
+                os.makedirs(data_dir, exist_ok=True)
+                
+                train_path = os.path.join(data_dir, "train_data.json")
+                test_path = os.path.join(data_dir, "test_data.json")
+                
+                # 保存为JSON文件
+                with open(train_path, 'w') as f:
+                    json.dump({
+                        "trajectories": train_trajectories,
+                        "state_dim": self.processed_data.get("state_dim", ()),
+                        "action_dim": self.processed_data.get("action_dim", 0)
+                    }, f, indent=2)
+                    
+                with open(test_path, 'w') as f:
+                    json.dump({
+                        "trajectories": test_trajectories,
+                        "state_dim": self.processed_data.get("state_dim", ()),
+                        "action_dim": self.processed_data.get("action_dim", 0)
+                    }, f, indent=2)
+                    
+                logger.info(f"训练集和测试集已保存至: {data_dir}")
+                self.statusBar().showMessage(f"数据已分割并保存至{data_dir}")
+                self.data_info_text.append(f"训练集大小: {len(train_trajectories)}条轨迹")
+                self.data_info_text.append(f"测试集大小: {len(test_trajectories)}条轨迹")
+            
         except Exception as e:
             import traceback
             error_traceback = traceback.format_exc()
@@ -720,6 +760,9 @@ class MainWindow(QMainWindow):
         self.current_model = result.get('model')
         self.current_model_id = result.get('model_id')
         
+        # 保存训练结果用于可视化
+        self.training_result = result
+        
         # 更新评估模型下拉框
         if self.current_model_id:
             self.eval_model_combo.addItem(self.current_model_id)
@@ -838,25 +881,68 @@ class MainWindow(QMainWindow):
             
             # 准备可视化数据
             data = {}
+
+            print(self.eval_results_text.toPlainText())
             
             # 根据可视化类型准备不同的数据
             if vis_type == 'line':
-                # 从评估结果中提取数据
-                eval_text = self.eval_results_text.toPlainText()
-                if eval_text:
-                    lines = eval_text.strip().split('\n')
-                    metrics = {}
-                    for line in lines:
-                        if ':' in line:
-                            key, value = line.split(':', 1)
-                            try:
-                                metrics[key.strip()] = float(value.strip())
-                            except ValueError:
-                                continue
+                # 优先从训练结果中获取loss曲线数据
+                if hasattr(self, 'training_result') and self.training_result:
+                    training_metrics = self.training_result.get('training_metrics', {})
+                    train_loss = training_metrics.get('train_loss', [])
+                    val_loss = training_metrics.get('val_loss', [])
                     
-                    if metrics:
-                        data['x'] = list(range(len(metrics)))
-                        data['y'] = metrics
+                    if train_loss:
+                        # 使用训练loss历史数据
+                        data['x'] = list(range(len(train_loss)))
+                        data['y'] = {}
+                        
+                        if train_loss:
+                            data['y']['训练loss'] = train_loss
+                        if val_loss:
+                            data['y']['验证loss'] = val_loss
+                            
+                        # 设置默认标题和标签
+                        if not self.vis_title.text():
+                            self.vis_title.setText("Training Loss Curve")
+                        if not self.vis_xlabel.text():
+                            self.vis_xlabel.setText("Epoch")
+                        if not self.vis_ylabel.text():
+                            self.vis_ylabel.setText("Loss")
+                    else:
+                        # 如果没有loss历史，尝试从评估结果中提取数据
+                        eval_text = self.eval_results_text.toPlainText()
+                        if eval_text:
+                            lines = eval_text.strip().split('\n')
+                            metrics = {}
+                            for line in lines:
+                                if ':' in line:
+                                    key, value = line.split(':', 1)
+                                    try:
+                                        metrics[key.strip()] = float(value.strip())
+                                    except ValueError:
+                                        continue
+                            
+                            if metrics:
+                                data['x'] = list(range(len(metrics)))
+                                data['y'] = metrics
+                else:
+                    # 如果没有训练结果，从评估结果中提取数据
+                    eval_text = self.eval_results_text.toPlainText()
+                    if eval_text:
+                        lines = eval_text.strip().split('\n')
+                        metrics = {}
+                        for line in lines:
+                            if ':' in line:
+                                key, value = line.split(':', 1)
+                                try:
+                                    metrics[key.strip()] = float(value.strip())
+                                except ValueError:
+                                    continue
+                        
+                        if metrics:
+                            data['x'] = list(range(len(metrics)))
+                            data['y'] = metrics
             
             elif vis_type == 'bar':
                 # 从评估结果中提取数据
@@ -877,8 +963,6 @@ class MainWindow(QMainWindow):
                         data['y'] = list(metrics.values())
             
             elif vis_type == 'scatter':
-                # 生成随机散点数据用于演示
-                import numpy as np
                 n_points = 100
                 data['x'] = np.random.rand(n_points) * 10
                 data['y'] = np.random.rand(n_points) * 10
@@ -886,15 +970,11 @@ class MainWindow(QMainWindow):
                 data['sizes'] = np.random.rand(n_points) * 100 + 20
             
             elif vis_type == 'heatmap':
-                # 生成随机热力图数据用于演示
-                import numpy as np
                 data['matrix'] = np.random.rand(8, 10)
                 data['xlabels'] = [f'特征 {i+1}' for i in range(10)]
                 data['ylabels'] = [f'样本 {i+1}' for i in range(8)]
             
             elif vis_type == '3d':
-                # 生成3D数据用于演示
-                import numpy as np
                 n_points = 100
                 x = np.random.rand(n_points) * 10
                 y = np.random.rand(n_points) * 10
@@ -905,8 +985,6 @@ class MainWindow(QMainWindow):
                 data['colors'] = z
             
             elif vis_type == 'trajectory':
-                # 生成轨迹数据用于演示
-                import numpy as np
                 t1 = np.linspace(0, 2*np.pi, 100)
                 x1 = np.cos(t1) * t1/3
                 y1 = np.sin(t1) * t1/3
@@ -921,12 +999,10 @@ class MainWindow(QMainWindow):
                 }
             
             elif vis_type == 'distribution':
-                # 生成分布数据用于演示
-                import numpy as np
                 data['distributions'] = {
-                    '正态分布(0,1)': np.random.normal(0, 1, 1000),
-                    '正态分布(3,1.5)': np.random.normal(3, 1.5, 1000),
-                    '指数分布(2)': np.random.exponential(2, 1000)
+                    'N(0,1)': np.random.normal(0, 1, 1000),
+                    'N(3,1.5)': np.random.normal(3, 1.5, 1000),
+                    'X(2)': np.random.exponential(2, 1000)
                 }
             
             elif vis_type == 'comparison':
@@ -953,7 +1029,6 @@ class MainWindow(QMainWindow):
                 data['metrics'] = metrics
             
             elif vis_type == 'embedding':
-                # 生成嵌入数据用于演示
                 from sklearn.datasets import make_blobs
                 n_samples = 300
                 n_features = 10
