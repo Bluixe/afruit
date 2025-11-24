@@ -176,7 +176,7 @@ class ImitationLearningService:
         # 提取训练参数
         epochs = model_config.get('epochs', 100)
         batch_size = model_config.get('batch_size', 32)
-        learning_rate = model_config.get('learning_rate', 1e-4)
+        learning_rate = model_config.get('learning_rate', 1e-3)
         
         # 准备数据加载器
         data_loader = model.load_sequences(data, batch_size=batch_size)

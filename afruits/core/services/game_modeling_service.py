@@ -59,6 +59,7 @@ class GameModelingService:
         # 获取模型类型
         model_type = model_config.get('model_type', 'BehaviorCloner')
         model_id = model_config.get('model_id', f"{model_type}_{int(time.time())}")
+        save_path = model_config.get('save_path', None)
         
         self.logger.info(f"开始训练模型: {model_id}, 类型: {model_type}")
         
@@ -89,6 +90,16 @@ class GameModelingService:
             
             # 保存模型
             self.models[model_id] = model
+            if model_type == 'BehaviorCloner':
+                model.save_model(save_path)
+            elif model_type == 'OfflineRLearner':
+                model.save_model(save_path)
+            elif model_type == 'OfflineFSPLearner':
+                model.save_model(save_path)
+            elif model_type == 'AdversarialImitationLearner':
+                model.save_model(save_path)
+            else:
+                raise ValueError(f"不支持的模型类型: {model_type}")
             
             # 保存训练历史
             self.training_history[model_id] = metrics
@@ -126,6 +137,7 @@ class GameModelingService:
         # 处理数据
         X_train, y_train = model.process_data(data, context_frames=context_frames)
         
+        model.build_model(state_dim, action_dim)
         # 训练模型
         training_history = model.train_model(X_train, y_train, state_dim, action_dim, validation_split=validation_split)
         
@@ -199,11 +211,11 @@ class GameModelingService:
         self.logger.info("训练离线虚构自我博弈模型")
         
         # 提取模型参数
-        strategy_pool_size = model_config.get('strategy_pool_size', 20)
+        strategy_pool_size = model_config.get('strategy_pool_size', 10)
         cql_penalty_weight = model_config.get('cql_penalty_weight', 0.7)
         exposure_ratio = model_config.get('exposure_ratio', 0.6)
         importance_beta = model_config.get('importance_beta', 0.5)
-        num_iterations = model_config.get('num_iterations', 50)
+        num_iterations = model_config.get('num_iterations', 20)
         
         # 创建模型
         model = OfflineFSPLearner(

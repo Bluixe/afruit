@@ -6,11 +6,11 @@ import torch
 import logging
 import datetime
 import matplotlib.pyplot as plt
-from PyQt5.QtWidgets import (QApplication, QMainWindow, QTabWidget, QWidget, QVBoxLayout, 
-                            QHBoxLayout, QPushButton, QLabel, QFileDialog, QComboBox, 
-                            QTextEdit, QGroupBox, QFormLayout, QSpinBox, QDoubleSpinBox, 
-                            QCheckBox, QTableWidget, QTableWidgetItem, QSplitter, 
-                            QMessageBox, QProgressBar, QLineEdit)
+from PyQt5.QtWidgets import (QApplication, QMainWindow, QTabWidget, QWidget, QVBoxLayout,
+                            QHBoxLayout, QPushButton, QLabel, QFileDialog, QComboBox,
+                            QTextEdit, QGroupBox, QFormLayout, QSpinBox, QDoubleSpinBox,
+                            QCheckBox, QTableWidget, QTableWidgetItem, QSplitter,
+                            QMessageBox, QProgressBar, QLineEdit, QInputDialog)
 from PyQt5.QtCore import Qt, QThread, pyqtSignal
 from PyQt5.QtGui import QFont, QIcon
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
@@ -40,6 +40,25 @@ class MatplotlibCanvas(FigureCanvas):
         self.fig = Figure(figsize=(width, height), dpi=dpi)
         self.axes = self.fig.add_subplot(111)
         super(MatplotlibCanvas, self).__init__(self.fig)
+
+    def set_projection(self, projection: str = None):
+        """
+        切换当前画布的坐标轴投影类型。
+        - projection=None: 2D
+        - projection='3d': 3D
+        - projection='polar': 极坐标（用于雷达图）
+        """
+        # 清空当前figure并重建axes
+        self.fig.clf()
+        if projection == '3d':
+            from mpl_toolkits.mplot3d import Axes3D  # noqa: F401 (register 3d)
+            self.axes = self.fig.add_subplot(111, projection='3d')
+        elif projection == 'polar':
+            self.axes = self.fig.add_subplot(111, projection='polar')
+        else:
+            self.axes = self.fig.add_subplot(111)
+        # 立即刷新但不阻塞
+        self.draw_idle()
 
 class TrainingThread(QThread):
     """训练线程类，用于在后台执行模型训练"""
@@ -95,6 +114,9 @@ class MainWindow(QMainWindow):
         
         # 初始化API
         self.api = AlgorithmAPI(log_level="INFO")
+
+        # 先获取可用模型，供UI构建使用
+        self.available_models = self.api.get_available_models()
         
         # 初始化UI
         self.init_ui()
@@ -108,8 +130,10 @@ class MainWindow(QMainWindow):
         self.current_model = None
         self.current_model_id = None
         self.training_result = None  # 用于存储训练结果，供可视化使用
-        self.available_models = self.api.get_available_models()
-        
+        # 评估结果历史（用于对比可视化）
+        self.eval_history = []
+        self.eval_counter = 0
+         
         # 更新模型下拉框
         self.update_model_combobox()
         
@@ -117,7 +141,7 @@ class MainWindow(QMainWindow):
         
     def init_ui(self):
         """初始化用户界面"""
-        self.setWindowTitle("小样本博弈建模与专家轨迹模仿学习软件")
+        self.setWindowTitle("算法小样本快速升级迭代训练软件")
         self.setGeometry(100, 100, 1200, 800)
         
         # 创建中央部件和主布局
@@ -403,33 +427,91 @@ class MainWindow(QMainWindow):
         """创建评估选项卡"""
         evaluation_tab = QWidget()
         layout = QVBoxLayout(evaluation_tab)
-        
+    
         # 模型选择部分
         model_group = QGroupBox("模型选择")
-        model_layout = QHBoxLayout()
-        
-        model_layout.addWidget(QLabel("选择模型:"))
+        model_layout = QVBoxLayout()
+    
+        # 已加载模型ID展示（仅用于显示当前选择的模型ID）
+        row_loaded = QHBoxLayout()
+        row_loaded.addWidget(QLabel("已选择/加载的模型ID:"))
         self.eval_model_combo = QComboBox()
-        model_layout.addWidget(self.eval_model_combo)
-        
+        row_loaded.addWidget(self.eval_model_combo)
+        model_layout.addLayout(row_loaded)
+    
+        # 评估时的模型类型选择（用于正确实例化模型类）
+        row_type = QHBoxLayout()
+        row_type.addWidget(QLabel("模型类型:"))
+        self.eval_model_type_combo = QComboBox()
+        # 汇总所有模型类型
+        all_model_types = []
+        for category in self.available_models:
+            all_model_types.extend(list(self.available_models[category].keys()))
+        self.eval_model_type_combo.addItems(all_model_types)
+        row_type.addWidget(self.eval_model_type_combo)
+        model_layout.addLayout(row_type)
+    
+        # 从本地 models 目录选择模型文件
+        row_local = QHBoxLayout()
+        row_local.addWidget(QLabel("本地模型文件:"))
+        self.local_model_combo = QComboBox()
+        row_local.addWidget(self.local_model_combo)
+        refresh_models_btn = QPushButton("刷新本地模型")
+        refresh_models_btn.clicked.connect(self.scan_local_models)
+        row_local.addWidget(refresh_models_btn)
+        model_layout.addLayout(row_local)
+    
+        # 通过文件对话框选择模型文件
+        row_browse = QHBoxLayout()
+        self.eval_model_path = QLineEdit()
+        self.eval_model_path.setPlaceholderText("可手动填写或通过“浏览...”选择模型文件")
+        row_browse.addWidget(self.eval_model_path)
+        browse_model_btn = QPushButton("浏览...")
+        browse_model_btn.clicked.connect(lambda: self.load_model(browse=True))
+        row_browse.addWidget(browse_model_btn)
         load_model_btn = QPushButton("加载模型")
         load_model_btn.clicked.connect(self.load_model)
-        model_layout.addWidget(load_model_btn)
-        
+        row_browse.addWidget(load_model_btn)
+        model_layout.addLayout(row_browse)
+    
         model_group.setLayout(model_layout)
         layout.addWidget(model_group)
-        
+    
+        # 评估数据加载部分
+        eval_data_group = QGroupBox("评估数据")
+        eval_data_layout = QFormLayout()
+        data_path_row = QHBoxLayout()
+        self.eval_test_data_path = QLineEdit()
+        self.eval_test_data_path.setPlaceholderText("评估数据文件路径（若为空将尝试使用默认 data/test_data.json）")
+        data_path_row.addWidget(self.eval_test_data_path)
+        eval_test_browse_btn = QPushButton("浏览...")
+        eval_test_browse_btn.clicked.connect(self.load_eval_test_data)
+        data_path_row.addWidget(eval_test_browse_btn)
+        eval_data_layout.addRow("数据路径:", data_path_row)
+    
+        self.eval_data_format_combo = QComboBox()
+        self.eval_data_format_combo.addItems(["json", "csv", "npy"])
+        eval_data_layout.addRow("数据格式:", self.eval_data_format_combo)
+        eval_data_group.setLayout(eval_data_layout)
+        layout.addWidget(eval_data_group)
+    
         # 评估配置部分
         eval_config_group = QGroupBox("评估配置")
         eval_config_layout = QFormLayout()
-        
+    
         self.eval_method_combo = QComboBox()
         self.eval_method_combo.addItems(["offline", "multi_metric"])
         eval_config_layout.addRow("评估方法:", self.eval_method_combo)
         
         self.eval_metric_combo = QComboBox()
-        self.eval_metric_combo.addItems(["IS", "WIS", "FQE", "MB"])
+        # 与 OfflineEvaluator 支持的指标保持一致（IS/DR/CIS），其余可后续扩展
+        self.eval_metric_combo.addItems(["IS", "DR", "CIS"])
         eval_config_layout.addRow("评估指标:", self.eval_metric_combo)
+
+        # 评估标签（用于记录历史对比）
+        self.eval_label_input = QLineEdit()
+        self.eval_label_input.setPlaceholderText("评估标签，例如: Baseline, Method-X")
+        eval_config_layout.addRow("评估标签:", self.eval_label_input)
         
         eval_btn = QPushButton("开始评估")
         eval_btn.clicked.connect(self.evaluate_model)
@@ -437,18 +519,21 @@ class MainWindow(QMainWindow):
         
         eval_config_group.setLayout(eval_config_layout)
         layout.addWidget(eval_config_group)
-        
+    
         # 评估结果部分
         results_group = QGroupBox("评估结果")
         results_layout = QVBoxLayout()
-        
+    
         self.eval_results_text = QTextEdit()
         self.eval_results_text.setReadOnly(True)
         results_layout.addWidget(self.eval_results_text)
-        
+    
         results_group.setLayout(results_layout)
         layout.addWidget(results_group)
-        
+    
+        # 初始化本地模型列表
+        self.scan_local_models()
+    
         self.tabs.addTab(evaluation_tab, "模型评估")
         
     def create_visualization_tab(self):
@@ -462,8 +547,20 @@ class MainWindow(QMainWindow):
         
         vis_type_layout.addWidget(QLabel("选择类型:"))
         self.vis_type_combo = QComboBox()
-        self.vis_type_combo.addItems(["line", "bar", "scatter", "heatmap", "3d", 
-                                     "trajectory", "distribution", "comparison", "embedding"])
+        self.vis_type_combo.addItems([
+            "line", 
+            "bar", 
+            # "scatter", 
+            # "heatmap", 
+            "3d",
+            "trajectory", 
+            "traj_heatmap", 
+            "action_hist", 
+            "radar",
+            # "distribution", 
+            # "comparison", 
+            # "embedding"
+        ])
         vis_type_layout.addWidget(self.vis_type_combo)
         
         vis_type_group.setLayout(vis_type_layout)
@@ -473,13 +570,13 @@ class MainWindow(QMainWindow):
         vis_config_group = QGroupBox("可视化配置")
         vis_config_layout = QFormLayout()
         
-        self.vis_title = QLineEdit("可视化图表")
+        self.vis_title = QLineEdit("Visualization")
         vis_config_layout.addRow("标题:", self.vis_title)
         
-        self.vis_xlabel = QLineEdit("X轴")
+        self.vis_xlabel = QLineEdit("X")
         vis_config_layout.addRow("X轴标签:", self.vis_xlabel)
         
-        self.vis_ylabel = QLineEdit("Y轴")
+        self.vis_ylabel = QLineEdit("Y")
         vis_config_layout.addRow("Y轴标签:", self.vis_ylabel)
         
         self.vis_grid = QCheckBox()
@@ -528,7 +625,7 @@ class MainWindow(QMainWindow):
         try:
             file_dialog = QFileDialog()
             file_path, _ = file_dialog.getOpenFileName(
-                self, f"选择{data_type}数据文件", "", 
+                self, f"选择{data_type}数据文件", "",
                 "数据文件 (*.json *.csv *.npy);;所有文件 (*)"
             )
             
@@ -544,18 +641,31 @@ class MainWindow(QMainWindow):
             # 获取数据格式
             data_format = self.data_format_combo.currentText()
             
-            # 加载数据
+            # 加载数据（AlgorithmAPI.load_data 会返回包含 state_dim/action_dim/trajectories 的字典）
             data = self.api.load_data(file_path, data_format)
+            
+            # 统计条目
+            num_traj = 0
+            if isinstance(data, dict) and isinstance(data.get('trajectories', None), (list, tuple)):
+                num_traj = len(data['trajectories'])
+            elif isinstance(data, dict) and isinstance(data.get('trajectories', None), np.ndarray):
+                num_traj = data['trajectories'].shape[0]
+            elif isinstance(data, list):
+                num_traj = len(data)
             
             # 更新数据信息
             if data_type == 'train':
                 self.training_data = data
                 self.data_info_text.append(f"训练数据加载成功: {file_path}")
-                self.data_info_text.append(f"数据条目数: {len(data) if isinstance(data, list) else '未知'}")
+                self.data_info_text.append(f"轨迹数量: {num_traj}")
             else:
                 self.test_data = data
                 self.data_info_text.append(f"测试数据加载成功: {file_path}")
-                self.data_info_text.append(f"数据条目数: {len(data) if isinstance(data, list) else '未知'}")
+                self.data_info_text.append(f"轨迹数量: {num_traj}")
+            
+            # 附加维度信息
+            if isinstance(data, dict):
+                self.data_info_text.append(f"state_dim: {data.get('state_dim')}, action_dim: {data.get('action_dim')}")
             
             self.statusBar().showMessage(f"{data_type}数据加载成功")
             logger.info(f"{data_type}数据加载成功: {file_path}")
@@ -580,7 +690,7 @@ class MainWindow(QMainWindow):
                 'normalize': self.normalize_check.isChecked()
             }
             
-            # 预处理数据
+            # 预处理数据（DataPreprocessor.load_data 将把列表转为np.array并校验）
             self.processed_data = self.api.preprocess_data(self.training_data, preprocess_config)
             
             # 更新状态
@@ -594,34 +704,53 @@ class MainWindow(QMainWindow):
                 import json
                 import os
                 import numpy as np
+
+                def to_serializable(x):
+                    import numpy as _np
+                    if isinstance(x, _np.ndarray):
+                        return x.tolist()
+                    if isinstance(x, (_np.floating,)):
+                        return float(x)
+                    if isinstance(x, (_np.integer,)):
+                        return int(x)
+                    if isinstance(x, dict):
+                        return {k: to_serializable(v) for k, v in x.items()}
+                    if isinstance(x, (list, tuple)):
+                        return [to_serializable(v) for v in x]
+                    return x
                 
                 trajectories = self.processed_data["trajectories"]
-                np.random.shuffle(trajectories)
-                split_index = int(0.8 * len(trajectories))
-                train_trajectories = trajectories[:split_index]
-                test_trajectories = trajectories[split_index:]
+                # 随机打乱并切分
+                indices = np.arange(len(trajectories))
+                np.random.shuffle(indices)
+                split_index = int(0.8 * len(indices))
+                train_indices = indices[:split_index]
+                test_indices = indices[split_index:]
+                train_trajectories = [trajectories[i] for i in train_indices]
+                test_trajectories = [trajectories[i] for i in test_indices]
                 
-                # 保存训练集和测试集
+                # 保存训练集和测试集（将ndarray安全转换为list）
                 data_dir = "data"
                 os.makedirs(data_dir, exist_ok=True)
                 
                 train_path = os.path.join(data_dir, "train_data.json")
                 test_path = os.path.join(data_dir, "test_data.json")
                 
-                # 保存为JSON文件
-                with open(train_path, 'w') as f:
+                with open(train_path, 'w', encoding='utf-8') as f:
                     json.dump({
-                        "trajectories": train_trajectories,
-                        "state_dim": self.processed_data.get("state_dim", ()),
-                        "action_dim": self.processed_data.get("action_dim", 0)
-                    }, f, indent=2)
+                        "data": to_serializable(train_trajectories),
+                        "state_dim": to_serializable(self.processed_data.get("state_dim", ())),
+                        "action_dim": int(self.processed_data.get("action_dim", 0)),
+                        "traj_length": int(self.processed_data.get("traj_length", 0))
+                    }, f, ensure_ascii=False, indent=2)
                     
-                with open(test_path, 'w') as f:
+                with open(test_path, 'w', encoding='utf-8') as f:
                     json.dump({
-                        "trajectories": test_trajectories,
-                        "state_dim": self.processed_data.get("state_dim", ()),
-                        "action_dim": self.processed_data.get("action_dim", 0)
-                    }, f, indent=2)
+                        "data": to_serializable(test_trajectories),
+                        "state_dim": to_serializable(self.processed_data.get("state_dim", ())),
+                        "action_dim": int(self.processed_data.get("action_dim", 0)),
+                        "traj_length": int(self.processed_data.get("traj_length", 0))
+                    }, f, ensure_ascii=False, indent=2)
                     
                 logger.info(f"训练集和测试集已保存至: {data_dir}")
                 self.statusBar().showMessage(f"数据已分割并保存至{data_dir}")
@@ -653,15 +782,16 @@ class MainWindow(QMainWindow):
             file_ext = os.path.splitext(file_path)[1].lower()
             
             # 加载数据
-            if file_ext == '.npy':
-                import numpy as np
-                self.training_data = np.load(file_path, allow_pickle=True).item()
-            elif file_ext == '.pt':
-                self.training_data = torch.load(file_path)
-            else:
-                # 使用API加载其他格式
-                data_format = 'json' if file_ext == '.json' else 'csv'
-                self.training_data = self.api.load_data(file_path, data_format)
+            # if file_ext == '.npy':
+            #     import numpy as np
+            #     self.training_data = np.load(file_path, allow_pickle=True).item()
+            # elif file_ext == '.pt':
+            #     self.training_data = torch.load(file_path)
+            # else:
+            #     # 使用API加载其他格式
+            data_format = 'json' if file_ext == '.json' else 'csv'
+            model_type = self.model_type_combo.currentText()
+            self.training_data = self.api.load_processed_data(file_path, data_format, model_type)
             
             # 显示数据信息
             self.statusBar().showMessage(f"训练数据加载成功: {file_path}")
@@ -699,16 +829,25 @@ class MainWindow(QMainWindow):
             else:
                 training_data = self.training_data
             
-            # 基本配置
+            # 基本配置 + 训练保存路径（保存到本地 models 文件夹）
+            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            save_dir = "models"
+            os.makedirs(save_dir, exist_ok=True)
+            default_model_file = f"{model_type}_{timestamp}.pt"
+            save_path = os.path.join(save_dir, default_model_file)
+
             model_config = {
                 'model_type': model_type,
                 'training_method': training_method,
                 'batch_size': self.batch_size.value(),
                 'max_epochs': self.epochs.value(),
+                # 一些训练器使用 'epochs' 作为键，保留两者以兼容不同训练器实现
+                'epochs': self.epochs.value(),
                 'learning_rate': self.learning_rate.value(),
-                'validation_split': self.validation_split.value()
+                'validation_split': self.validation_split.value(),
+                'save_path': save_path
             }
-            
+
             # 添加高级参数
             advanced_params_text = self.advanced_params_text.toPlainText()
             if advanced_params_text:
@@ -779,90 +918,199 @@ class MainWindow(QMainWindow):
         QMessageBox.information(self, "训练完成", f"模型 {self.current_model_id} 训练完成\n\n{metrics_text}")
         logger.info(f"模型 {self.current_model_id} 训练完成")
     
-    def load_model(self):
-        """加载模型"""
+    def load_model(self, browse: bool = False):
+        """加载模型（支持从本地 models 文件夹或文件对话框选择）"""
         try:
-            file_dialog = QFileDialog()
-            file_path, _ = file_dialog.getOpenFileName(
-                self, "选择模型文件", "", 
-                "模型文件 (*.pt *.pth);;所有文件 (*)"
-            )
-            
-            if not file_path:
-                return
-            
-            # 获取模型类型
-            model_type, ok = QInputDialog.getItem(
-                self, "选择模型类型", "模型类型:", 
-                list(self.available_models['基础算法模型'].keys()) + 
-                list(self.available_models['轨迹建模与生成模型'].keys()) + 
-                list(self.available_models['训练方法模型'].keys()),
-                0, False
-            )
-            
-            if not ok:
-                return
-            
-            # 加载模型
+            file_path = ""
+            # 1) 如果点击“浏览...”
+            if browse:
+                file_dialog = QFileDialog()
+                chosen_path, _ = file_dialog.getOpenFileName(
+                    self, "选择模型文件", "",
+                    "模型文件 (*.pt *.pth);;所有文件 (*)"
+                )
+                if not chosen_path:
+                    return
+                self.eval_model_path.setText(chosen_path)
+                file_path = chosen_path
+            else:
+                # 2) 优先使用文本框路径，其次使用本地模型下拉框
+                if self.eval_model_path.text():
+                    file_path = self.eval_model_path.text().strip()
+                elif self.local_model_combo.count() > 0:
+                    file_path = self.local_model_combo.currentText().strip()
+                else:
+                    # 如果都没有，则弹出对话框
+                    file_dialog = QFileDialog()
+                    chosen_path, _ = file_dialog.getOpenFileName(
+                        self, "选择模型文件", "",
+                        "模型文件 (*.pt *.pth);;所有文件 (*)"
+                    )
+                    if not chosen_path:
+                        return
+                    file_path = chosen_path
+                    self.eval_model_path.setText(file_path)
+
+            # 选择模型类型（用于定位模型类）
+            model_type = self.eval_model_type_combo.currentText() if hasattr(self, 'eval_model_type_combo') else self.model_type_combo.currentText()
             model_class = None
             for category in self.available_models:
                 if model_type in self.available_models[category]:
                     model_class = self.available_models[category][model_type]
                     break
-            
+
             if model_class is None:
                 QMessageBox.warning(self, "警告", f"未找到模型类型: {model_type}")
                 return
-            
+
             # 加载模型
             self.current_model = self.api.load_model(model_class, file_path)
             self.current_model_id = f"{model_type}_{os.path.basename(file_path)}"
-            
-            # 更新评估模型下拉框
+
+            # 更新评估模型下拉框（仅用于显示）
             self.eval_model_combo.addItem(self.current_model_id)
             self.eval_model_combo.setCurrentText(self.current_model_id)
-            
+
             self.statusBar().showMessage(f"模型加载成功: {file_path}")
             logger.info(f"模型加载成功: {file_path}")
-            
+
         except Exception as e:
             import traceback
             error_traceback = traceback.format_exc()
             QMessageBox.critical(self, "错误", f"模型加载失败: {str(e)}")
             logger.error(f"模型加载失败: {str(e)}\n{error_traceback}")
-    
+
+    def scan_local_models(self):
+        """扫描本地 models 目录并填充下拉框"""
+        try:
+            import glob
+            candidates = []
+
+            # 支持多种可能的本地目录
+            base_dirs = [
+                os.path.join(os.path.dirname(os.path.abspath(__file__)), "models"),
+                os.path.join("afruits", "models"),
+                "models"
+            ]
+            for base in base_dirs:
+                if os.path.isdir(base):
+                    candidates.extend(glob.glob(os.path.join(base, "*.pt")))
+                    candidates.extend(glob.glob(os.path.join(base, "*.pth")))
+
+            self.local_model_combo.clear()
+            if candidates:
+                # 去重并排序
+                unique_candidates = sorted(list(set(candidates)))
+                self.local_model_combo.addItems(unique_candidates)
+            else:
+                self.local_model_combo.addItem("")  # 保持控件存在
+
+        except Exception as e:
+            logger.error(f"扫描本地模型失败: {str(e)}")
+
+    def load_eval_test_data(self):
+        """在评估页加载测试数据"""
+        try:
+            file_dialog = QFileDialog()
+            file_path, _ = file_dialog.getOpenFileName(
+                self, "选择评估数据文件", "",
+                "数据文件 (*.json *.csv *.npy);;所有文件 (*)"
+            )
+            if not file_path:
+                return
+
+            self.eval_test_data_path.setText(file_path)
+            data_format = self.eval_data_format_combo.currentText() if hasattr(self, 'eval_data_format_combo') else 'json'
+            # 使用与训练一致的处理管线（包含 state_dim/action_dim）
+            model_type = self.model_type_combo.currentText() if hasattr(self, 'model_type_combo') else self.eval_model_type_combo.currentText()
+            self.test_data = self.api.load_processed_data(file_path, data_format, model_type)
+
+            # 反馈信息
+            self.statusBar().showMessage(f"评估数据加载成功: {file_path}")
+            logger.info(f"评估数据加载成功: {file_path}")
+            self.eval_results_text.append(f"评估数据加载成功: {file_path}")
+
+        except Exception as e:
+            import traceback
+            error_traceback = traceback.format_exc()
+            QMessageBox.critical(self, "错误", f"评估数据加载失败: {str(e)}")
+            logger.error(f"评估数据加载失败: {str(e)}\n{error_traceback}")
+
     def evaluate_model(self):
         """评估模型"""
         try:
             if self.current_model is None:
                 QMessageBox.warning(self, "警告", "请先训练或加载模型")
                 return
-            
+
+            # 尝试自动加载评估数据
             if self.test_data is None:
-                QMessageBox.warning(self, "警告", "请先加载测试数据")
-                return
-            
+                candidate_path = self.eval_test_data_path.text().strip() if hasattr(self, 'eval_test_data_path') else ""
+                if not candidate_path:
+                    # 默认使用项目内的 data/test_data.json
+                    default_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "test_data.json")
+                    if os.path.exists(default_path):
+                        candidate_path = default_path
+
+                if candidate_path and os.path.exists(candidate_path):
+                    data_format = self.eval_data_format_combo.currentText() if hasattr(self, 'eval_data_format_combo') else 'json'
+                    model_type = self.model_type_combo.currentText() if hasattr(self, 'model_type_combo') else self.eval_model_type_combo.currentText()
+                    try:
+                        # 使用 processed 加载，确保有维度信息
+                        self.test_data = self.api.load_processed_data(candidate_path, data_format, model_type)
+                        self.eval_results_text.append(f"自动加载测试数据: {candidate_path}")
+                    except Exception as e:
+                        QMessageBox.warning(self, "警告", f"测试数据自动加载失败: {str(e)}")
+                        return
+                else:
+                    QMessageBox.warning(self, "警告", "请先加载测试数据")
+                    return
+
             # 获取评估配置
             eval_config = {
                 'method': self.eval_method_combo.currentText(),
                 'method_type': self.eval_metric_combo.currentText()
             }
-            
+
             # 评估模型
             eval_result = self.api.evaluate_model(self.current_model, self.test_data, eval_config)
-            
+
+            # 记录至评估历史（仅保存数值型指标）
+            try:
+                label = self.eval_label_input.text().strip() if hasattr(self, 'eval_label_input') else ""
+            except Exception:
+                label = ""
+            if not label:
+                # 尝试使用当前模型ID或生成默认标签
+                label = self.current_model_id if self.current_model_id else f"Run-{self.eval_counter + 1}"
+            metrics_numeric = {}
+            try:
+                import numpy as _np
+                for k, v in eval_result.items():
+                    if isinstance(v, (int, float, _np.integer, _np.floating)):
+                        metrics_numeric[k] = float(v)
+            except Exception:
+                # 兜底仅保留纯int/float
+                metrics_numeric = {k: float(v) for k, v in eval_result.items() if isinstance(v, (int, float))}
+            if not hasattr(self, 'eval_history'):
+                self.eval_history = []
+                self.eval_counter = 0
+            self.eval_history.append({'label': label, 'metrics': metrics_numeric})
+            self.eval_counter += 1
+
             # 显示评估结果
-            result_text = "评估结果:\n"
+            result_text = f"评估结果 ({label}):\n"
             for key, value in eval_result.items():
                 if isinstance(value, (int, float)):
                     result_text += f"{key}: {value:.4f}\n"
                 else:
                     result_text += f"{key}: {value}\n"
-            
+
             self.eval_results_text.setText(result_text)
             self.statusBar().showMessage("模型评估完成")
-            logger.info("模型评估完成")
-            
+            logger.info(f"模型评估完成，已记录历史标签: {label}")
+            logger.info(self.eval_history)
+
         except Exception as e:
             import traceback
             error_traceback = traceback.format_exc()
@@ -872,12 +1120,14 @@ class MainWindow(QMainWindow):
     def generate_visualization(self):
         """生成可视化"""
         try:
-            if self.current_model is None and self.eval_results_text.toPlainText() == "":
-                QMessageBox.warning(self, "警告", "请先训练或评估模型以获取可视化数据")
-                return
-            
+                        
             # 获取可视化类型
             vis_type = self.vis_type_combo.currentText()
+            
+            if self.current_model is None and self.eval_results_text.toPlainText() == "" and vis_type not in ["3d", "trajectory", "traj_heatmap"]:
+                QMessageBox.warning(self, "警告", "请先训练或评估模型以获取可视化数据")
+                return
+
             
             # 准备可视化数据
             data = {}
@@ -898,9 +1148,9 @@ class MainWindow(QMainWindow):
                         data['y'] = {}
                         
                         if train_loss:
-                            data['y']['训练loss'] = train_loss
+                            data['y']['Train Loss'] = train_loss
                         if val_loss:
-                            data['y']['验证loss'] = val_loss
+                            data['y']['Val Loss'] = val_loss
                             
                         # 设置默认标题和标签
                         if not self.vis_title.text():
@@ -945,22 +1195,66 @@ class MainWindow(QMainWindow):
                             data['y'] = metrics
             
             elif vis_type == 'bar':
-                # 从评估结果中提取数据
-                eval_text = self.eval_results_text.toPlainText()
-                if eval_text:
-                    lines = eval_text.strip().split('\n')
-                    metrics = {}
-                    for line in lines:
-                        if ':' in line:
-                            key, value = line.split(':', 1)
-                            try:
-                                metrics[key.strip()] = float(value.strip())
-                            except ValueError:
-                                continue
-                    
-                    if metrics:
-                        data['x'] = list(metrics.keys())
-                        data['y'] = list(metrics.values())
+                # 优先使用历史评估结果进行对比可视化
+                if hasattr(self, 'eval_history') and self.eval_history:
+                    # 仅对比公共指标 'accuracy'
+                    logger.info(self.eval_history)
+                    has_accuracy = any(('metrics' in run and isinstance(run['metrics'], dict) and 'accuracy' in run['metrics']) for run in self.eval_history)
+                    metrics_order = ['accuracy'] if has_accuracy else []
+                    logger.info(has_accuracy)
+                    logger.info(metrics_order)
+                    if metrics_order:
+                        # 分组柱状图：x为['accuracy']，每个label一组
+                        data['x'] = metrics_order
+                        y_dict = {}
+                        for run in self.eval_history:
+                            logger.info(run)
+                            label = run.get('label', 'Run')
+                            m = run.get('metrics', {})
+                            y_dict[label] = [float(m.get('accuracy', np.nan))]
+                            logger.info(m)
+                            logger.info(y_dict)
+                        data['y'] = y_dict
+                        
+                        # 设置默认标题与坐标轴（仅在未手动填入时）
+                        if not self.vis_title.text():
+                            self.vis_title.setText("Accuracy Comparison")
+                        if not self.vis_xlabel.text():
+                            self.vis_xlabel.setText("Metric")
+                        if not self.vis_ylabel.text():
+                            self.vis_ylabel.setText("Accuracy")
+                    else:
+                        # 若无可用指标，回退到解析当前文本
+                        eval_text = self.eval_results_text.toPlainText()
+                        if eval_text:
+                            lines = eval_text.strip().split('\n')
+                            metrics = {}
+                            for line in lines:
+                                if ':' in line:
+                                    key, value = line.split(':', 1)
+                                    try:
+                                        metrics[key.strip()] = float(value.strip())
+                                    except ValueError:
+                                        continue
+                            if metrics:
+                                data['x'] = list(metrics.keys())
+                                data['y'] = list(metrics.values())
+                else:
+                    # 回退：解析当前评估文本
+                    eval_text = self.eval_results_text.toPlainText()
+                    if eval_text:
+                        lines = eval_text.strip().split('\n')
+                        metrics = {}
+                        for line in lines:
+                            if ':' in line:
+                                key, value = line.split(':', 1)
+                                try:
+                                    metrics[key.strip()] = float(value.strip())
+                                except ValueError:
+                                    continue
+                        if metrics:
+                            data['x'] = list(metrics.keys())
+                            data['y'] = list(metrics.values())
             
             elif vis_type == 'scatter':
                 n_points = 100
@@ -971,32 +1265,79 @@ class MainWindow(QMainWindow):
             
             elif vis_type == 'heatmap':
                 data['matrix'] = np.random.rand(8, 10)
-                data['xlabels'] = [f'特征 {i+1}' for i in range(10)]
-                data['ylabels'] = [f'样本 {i+1}' for i in range(8)]
-            
+                data['xlabels'] = [f'Feature {i+1}' for i in range(10)]
+                data['ylabels'] = [f'Sample {i+1}' for i in range(8)]
+                
             elif vis_type == '3d':
-                n_points = 100
-                x = np.random.rand(n_points) * 10
-                y = np.random.rand(n_points) * 10
-                z = np.sin(x) * np.cos(y)
-                data['x'] = x
-                data['y'] = y
-                data['z'] = z
-                data['colors'] = z
+                # Delegate to VisualizationService to sample a random trajectory from trajectory.npy
+                data = {}
             
             elif vis_type == 'trajectory':
-                t1 = np.linspace(0, 2*np.pi, 100)
-                x1 = np.cos(t1) * t1/3
-                y1 = np.sin(t1) * t1/3
-                
-                t2 = np.linspace(0, 4*np.pi, 100)
-                x2 = np.cos(t2) * (4 - t2/2)
-                y2 = np.sin(t2) * (4 - t2/2)
-                
-                data['trajectories'] = {
-                    '轨迹 1': list(zip(x1, y1)),
-                    '轨迹 2': list(zip(x2, y2))
-                }
+                # Delegate to VisualizationService to sample a random trajectory from trajectory.npy
+                data = {}
+            
+            elif vis_type == 'traj_heatmap':
+                # 优先从评估/测试数据中抽取多条轨迹的states；否则交由VS从trajectory.npy聚合
+                data = {}
+                try:
+                    src = None
+                    if isinstance(self.test_data, dict):
+                        src = self.test_data.get('data') or self.test_data.get('trajectories')
+                    else:
+                        src = self.test_data
+                    if isinstance(src, (list, dict)) and src:
+                        # 将可用的states聚合为data['trajectories']列表，让VS自行解析
+                        if isinstance(src, list):
+                            trajs = []
+                            for tr in src:
+                                if isinstance(tr, dict) and 'states' in tr:
+                                    trajs.append({'states': tr['states']})
+                            if trajs:
+                                data['trajectories'] = trajs
+                        elif isinstance(src, dict):
+                            trajs = []
+                            for tr in src.values():
+                                if isinstance(tr, dict) and 'states' in tr:
+                                    trajs.append({'states': tr['states']})
+                            if trajs:
+                                data['trajectories'] = trajs
+                except Exception:
+                    pass
+            
+            elif vis_type == 'action_hist':
+                # 优先从评估/测试数据中抽取actions；否则交由VS从trajectory.npy抽取
+                data = {}
+                try:
+                    src = None
+                    if isinstance(self.test_data, dict):
+                        src = self.test_data.get('data') or self.test_data.get('trajectories')
+                    else:
+                        src = self.test_data
+                    if isinstance(src, list):
+                        # 聚合所有轨迹的actions
+                        acts = []
+                        for tr in src:
+                            if isinstance(tr, dict) and 'actions' in tr:
+                                acts.extend(list(tr['actions']))
+                        if acts:
+                            data['actions'] = acts
+                        else:
+                            # 作为备选，传递原轨迹结构给VS自行解析
+                            data['trajectories'] = src
+                    elif isinstance(src, dict):
+                        acts = []
+                        trajs = []
+                        for tr in src.values():
+                            if isinstance(tr, dict):
+                                if 'actions' in tr:
+                                    acts.extend(list(tr['actions']))
+                                trajs.append(tr)
+                        if acts:
+                            data['actions'] = acts
+                        else:
+                            data['trajectories'] = trajs
+                except Exception:
+                    pass
             
             elif vis_type == 'distribution':
                 data['distributions'] = {
@@ -1006,23 +1347,23 @@ class MainWindow(QMainWindow):
                 }
             
             elif vis_type == 'comparison':
-                # 从评估结果中提取数据或生成比较数据
-                models = ['模型A', '模型B', '模型C']
+                # Build a demo comparison dataset in English
+                models = ['Model A', 'Model B', 'Model C']
                 metrics = {
-                    '准确率': {
-                        '模型A': 0.85,
-                        '模型B': 0.82,
-                        '模型C': 0.88
+                    'Accuracy': {
+                        'Model A': 0.85,
+                        'Model B': 0.82,
+                        'Model C': 0.88
                     },
-                    '召回率': {
-                        '模型A': 0.76,
-                        '模型B': 0.81,
-                        '模型C': 0.79
+                    'Recall': {
+                        'Model A': 0.76,
+                        'Model B': 0.81,
+                        'Model C': 0.79
                     },
-                    'F1分数': {
-                        '模型A': 0.80,
-                        '模型B': 0.81,
-                        '模型C': 0.83
+                    'F1 Score': {
+                        'Model A': 0.80,
+                        'Model B': 0.81,
+                        'Model C': 0.83
                     }
                 }
                 data['models'] = models
@@ -1038,6 +1379,39 @@ class MainWindow(QMainWindow):
                 data['features'] = X
                 data['labels'] = y
             
+            elif vis_type == 'radar':
+                # 将当前评估文本中的数值指标解析为字典，供雷达图使用
+                data['metrics'] = {}
+                eval_text = self.eval_results_text.toPlainText()
+                if eval_text:
+                    lines = eval_text.strip().split('\n')
+                    parsed = {}
+                    for line in lines:
+                        if ':' in line:
+                            key, value = line.split(':', 1)
+                            try:
+                                parsed[key.strip()] = float(value.strip())
+                            except ValueError:
+                                continue
+                    # 选取一组稳定的指标作为雷达图展示（存在的条目才加入）
+                    preferred = [
+                        'accuracy', 'mean_abs_error', 'action_entropy',
+                        'action_switch_rate', 'unique_actions_ratio',
+                        'diversity_inter_cluster_distance',
+                        'diversity_intra_cluster_variance'
+                    ]
+                    for k in preferred:
+                        if k in parsed:
+                            data['metrics'][k] = parsed[k]
+                    # 若为空则使用全部解析出的数值（最多前10个）
+                    if not data['metrics'] and parsed:
+                        i = 0
+                        for k, v in parsed.items():
+                            data['metrics'][k] = v
+                            i += 1
+                            if i >= 10:
+                                break
+            
             # 准备可视化配置
             vis_config = {
                 'type': vis_type,
@@ -1049,6 +1423,12 @@ class MainWindow(QMainWindow):
                 'dpi': 100,
                 'save_dir': 'visualizations'
             }
+            # 对需要轨迹文件的可视化类型，尽可能注入 traj_path
+            if vis_type in ['3d', 'trajectory', 'traj_heatmap', 'action_hist']:
+                for _p in ['afruits/data/trajectory.npy', 'data/trajectory.npy', 'trajectory.npy']:
+                    if os.path.exists(_p):
+                        vis_config['traj_path'] = _p
+                        break
             
             # 确保保存目录存在
             os.makedirs(vis_config['save_dir'], exist_ok=True)
@@ -1058,44 +1438,249 @@ class MainWindow(QMainWindow):
             
             # 显示可视化结果
             if result and 'figures' in result and len(result['figures']) > 0:
-                # 清除当前画布
-                self.vis_canvas.axes.clear()
-                
-                # 将图表复制到画布
                 fig = result['figures'][0]
-                for ax in fig.get_axes():
-                    # 复制轴的内容到画布
-                    self.vis_canvas.axes.set_title(ax.get_title())
-                    self.vis_canvas.axes.set_xlabel(ax.get_xlabel())
-                    self.vis_canvas.axes.set_ylabel(ax.get_ylabel())
+                axes_list = fig.get_axes() if hasattr(fig, 'get_axes') else []
+
+                # 根据可视化类型选择2D/3D渲染路径
+                if vis_type == '3d':
+                    # 切换到3D轴并清空
+                    self.vis_canvas.set_projection('3d')
+                    self.vis_canvas.axes.cla()
+
+                    src_ax = axes_list[0] if axes_list else None
+                    if src_ax is not None:
+                        # 标题与坐标轴标签
+                        self.vis_canvas.axes.set_title(src_ax.get_title())
+                        self.vis_canvas.axes.set_xlabel(src_ax.get_xlabel())
+                        self.vis_canvas.axes.set_ylabel(src_ax.get_ylabel())
+                        # 3D轴可能有zlabel
+                        if hasattr(self.vis_canvas.axes, 'set_zlabel') and hasattr(src_ax, 'get_zlabel'):
+                            self.vis_canvas.axes.set_zlabel(src_ax.get_zlabel())
+
+                        # 复制3D折线
+                        for line in getattr(src_ax, 'lines', []):
+                            if hasattr(line, 'get_data_3d'):
+                                x3, y3, z3 = line.get_data_3d()
+                                self.vis_canvas.axes.plot(
+                                    x3, y3, z3,
+                                    color=line.get_color(),
+                                    linestyle=line.get_linestyle(),
+                                    marker=line.get_marker(),
+                                    label=line.get_label() if line.get_label() != '_nolegend_' else None
+                                )
+
+                        # 复制3D散点
+                        for artist in getattr(src_ax, 'collections', []):
+                            if hasattr(artist, '_offsets3d'):
+                                xs, ys, zs = artist._offsets3d
+                                sizes = artist.get_sizes() if hasattr(artist, 'get_sizes') else None
+                                facecolors = artist.get_facecolors() if hasattr(artist, 'get_facecolors') else None
+                                c = None
+                                if facecolors is not None and len(facecolors) > 0:
+                                    c = facecolors[0]
+                                self.vis_canvas.axes.scatter(xs, ys, zs, s=sizes, c=[c] if c is not None else None)
+
+                        # 图例
+                        handles, labels = self.vis_canvas.axes.get_legend_handles_labels()
+                        if handles:
+                            self.vis_canvas.axes.legend()
+
+                        # 网格
+                        if self.vis_grid.isChecked():
+                            self.vis_canvas.axes.grid(True, linestyle='--', alpha=0.7)
+
+                elif vis_type == 'radar':
+                    # 使用极坐标绘制雷达图（避免将极坐标内容复制到直角坐标导致“折线图”问题）
+                    self.vis_canvas.set_projection('polar')
+                    self.vis_canvas.axes.cla()
+                    try:
+                        metrics = data.get('metrics', {}) if isinstance(data, dict) else {}
+                        labels = list(metrics.keys())
+                        values = [float(metrics[k]) for k in labels] if labels else []
+                        if labels and values:
+                            import numpy as _np
+                            angles = _np.linspace(0, 2 * _np.pi, num=len(labels), endpoint=False).tolist()
+                            angles += angles[:1]
+                            values += values[:1]
+                            self.vis_canvas.axes.plot(angles, values, linewidth=2, linestyle='-', label='Metrics')
+                            self.vis_canvas.axes.fill(angles, values, alpha=0.25)
+                            self.vis_canvas.axes.set_xticks(angles[:-1])
+                            self.vis_canvas.axes.set_xticklabels(labels)
+                            # 自动径向范围
+                            try:
+                                vmax = float(_np.nanmax(values)) if _np.isfinite(values).all() else 1.0
+                                vmin = float(_np.nanmin(values)) if _np.isfinite(values).all() else 0.0
+                                if vmax == vmin:
+                                    vmax = vmin + 1.0
+                                self.vis_canvas.axes.set_ylim(vmin, vmax)
+                            except Exception:
+                                pass
+                            # 标题与网格
+                            self.vis_canvas.axes.set_title(self.vis_title.text())
+                            if self.vis_grid.isChecked():
+                                self.vis_canvas.axes.grid(True, linestyle='--', alpha=0.7)
+                    except Exception:
+                        # 出错时退回到复制渲染（仍保持极坐标轴）
+                        self.vis_canvas.set_projection('polar')
+                        self.vis_canvas.axes.cla()
+
+                elif vis_type == 'traj_heatmap':
+                    self.vis_canvas.set_projection(None)
+                    self.vis_canvas.axes.cla()
+
+                    import matplotlib.patches as mpatches
+
+                    for ax in axes_list:
+                        for _img in getattr(ax, 'images', []):
+                            try:
+                                arr = _img.get_array()
+                                extent = _img.get_extent() if hasattr(_img, 'get_extent') else None
+                                cmap = _img.get_cmap() if hasattr(_img, 'get_cmap') else None
+                                origin = getattr(_img, 'origin', 'upper')
+                                interpolation = _img.get_interpolation() if hasattr(_img, 'get_interpolation') else None
+                                if extent is not None:
+                                    self.vis_canvas.axes.imshow(arr, extent=extent, origin=origin, cmap=cmap, interpolation=interpolation, aspect='auto')
+                                else:
+                                    self.vis_canvas.axes.imshow(arr, origin=origin, cmap=cmap, interpolation=interpolation, aspect='auto')
+                            except Exception:
+                                # 静默失败，不影响其它元素复制
+                                pass
+
+                else:
+                    # 其它类型保持2D行为
+                    self.vis_canvas.set_projection(None)
+                    self.vis_canvas.axes.cla()
+
+                    import matplotlib.patches as mpatches
+
+                    for ax in axes_list:
+                        # 复制轴的内容到画布
+                        self.vis_canvas.axes.set_title(ax.get_title())
+                        self.vis_canvas.axes.set_xlabel(ax.get_xlabel())
+                        self.vis_canvas.axes.set_ylabel(ax.get_ylabel())
+                        
+                        # 复制折线
+                        for line in getattr(ax, 'lines', []):
+                            self.vis_canvas.axes.plot(
+                                line.get_xdata(), line.get_ydata(),
+                                color=line.get_color(),
+                                linestyle=line.get_linestyle(),
+                                marker=line.get_marker(),
+                                label=line.get_label() if line.get_label() != '_nolegend_' else None
+                            )
+                        
+                        # 复制散点图(2D)
+                        # for collection in getattr(ax, 'collections', []):
+                        #     if hasattr(collection, 'get_offsets'):
+                        #         offsets = collection.get_offsets()
+                        #         try:
+                        #             # offsets 可能是 Nx2 的数组或 PathCollection 指针
+                        #             xy = offsets if hasattr(offsets, '__array__') else offsets.to_array()
+                        #         except Exception:
+                        #             xy = np.array(offsets)
+                        #         if len(xy) > 0:
+                        #             x = xy[:, 0]
+                        #             y = xy[:, 1]
+                        #             self.vis_canvas.axes.scatter(
+                        #                 x, y,
+                        #                 c=collection.get_facecolors() if hasattr(collection, 'get_facecolors') else None,
+                        #                 s=collection.get_sizes() if hasattr(collection, 'get_sizes') else None
+                        #             )
+                        
+                        # 复制图像类（例如 heatmap/imshow），用于热力图/轨迹密度图显示
+                        for _img in getattr(ax, 'images', []):
+                            try:
+                                arr = _img.get_array()
+                                extent = _img.get_extent() if hasattr(_img, 'get_extent') else None
+                                cmap = _img.get_cmap() if hasattr(_img, 'get_cmap') else None
+                                origin = getattr(_img, 'origin', 'upper')
+                                interpolation = _img.get_interpolation() if hasattr(_img, 'get_interpolation') else None
+                                if extent is not None:
+                                    self.vis_canvas.axes.imshow(arr, extent=extent, origin=origin, cmap=cmap, interpolation=interpolation, aspect='auto')
+                                else:
+                                    self.vis_canvas.axes.imshow(arr, origin=origin, cmap=cmap, interpolation=interpolation, aspect='auto')
+                            except Exception:
+                                # 静默失败，不影响其它元素复制
+                                pass
+                        
+                        # 复制柱状图（关键修复：支持Bar）
+                        # Matplotlib的柱状条通常在 ax.patches 中（Rectangle）
+                        for rect in getattr(ax, 'patches', []):
+                            try:
+                                x = rect.get_x()
+                                y = rect.get_y()
+                                w = rect.get_width()
+                                h = rect.get_height()
+                                fc = rect.get_facecolor()
+                                ec = rect.get_edgecolor()
+                                lw = rect.get_linewidth()
+                                alpha = rect.get_alpha()
+                                r = mpatches.Rectangle((x, y), w, h,
+                                                       facecolor=fc, edgecolor=ec,
+                                                       linewidth=lw, alpha=alpha)
+                                self.vis_canvas.axes.add_patch(r)
+                            except Exception:
+                                # 忽略非矩形patch
+                                continue
+
+                        # 同步x/y刻度与刻度标签（用于分类柱状图的标签显示）
+                        try:
+                            self.vis_canvas.axes.set_xticks(ax.get_xticks())
+                            self.vis_canvas.axes.set_xticklabels([t.get_text() for t in ax.get_xticklabels()], rotation=0)
+                        except Exception:
+                            pass
+                        try:
+                            self.vis_canvas.axes.set_yticks(ax.get_yticks())
+                            self.vis_canvas.axes.set_yticklabels([t.get_text() for t in ax.get_yticklabels()])
+                        except Exception:
+                            pass
+
+                    # 在复制完内容后，计算可视范围（特别是Bar的Rectangle不参与relim，需要手动更新）
+                    try:
+                        import numpy as _np
+                        xmin, xmax = _np.inf, -_np.inf
+                        ymin, ymax = _np.inf, -_np.inf
+                        # 收集lines范围
+                        for _ln in getattr(self.vis_canvas.axes, 'lines', []):
+                            try:
+                                xdata = _ln.get_xdata()
+                                ydata = _ln.get_ydata()
+                                if len(xdata) and len(ydata):
+                                    xmin = min(xmin, _np.nanmin(xdata))
+                                    xmax = max(xmax, _np.nanmax(xdata))
+                                    ymin = min(ymin, _np.nanmin(ydata))
+                                    ymax = max(ymax, _np.nanmax(ydata))
+                            except Exception:
+                                pass
+                        # 收集patches范围（Bar）
+                        for _rect in getattr(self.vis_canvas.axes, 'patches', []):
+                            try:
+                                x = _rect.get_x()
+                                y = _rect.get_y()
+                                w = _rect.get_width()
+                                h = _rect.get_height()
+                                xmin = min(xmin, x)
+                                xmax = max(xmax, x + w)
+                                ymin = min(ymin, y)
+                                ymax = max(ymax, y + h)
+                            except Exception:
+                                pass
+                        if xmin < xmax and ymin < ymax and _np.isfinite([xmin, xmax, ymin, ymax]).all():
+                            xpad = (xmax - xmin) * 0.1 if xmax > xmin else 1.0
+                            ypad = (ymax - ymin) * 0.1 if ymax > ymin else 1.0
+                            self.vis_canvas.axes.set_xlim(xmin - xpad, xmax + xpad)
+                            self.vis_canvas.axes.set_ylim(ymin - ypad, ymax + ypad)
+                    except Exception:
+                        pass
+
+                    # 图例
+                    if self.vis_canvas.axes.get_legend_handles_labels()[0]:
+                        self.vis_canvas.axes.legend()
                     
-                    # 复制数据
-                    for line in ax.get_lines():
-                        self.vis_canvas.axes.plot(line.get_xdata(), line.get_ydata(),
-                                                 color=line.get_color(),
-                                                 linestyle=line.get_linestyle(),
-                                                 marker=line.get_marker(),
-                                                 label=line.get_label())
-                    
-                    # 复制散点图
-                    for collection in ax.collections:
-                        if hasattr(collection, 'get_offsets'):
-                            offsets = collection.get_offsets()
-                            if len(offsets) > 0:
-                                x = offsets[:, 0]
-                                y = offsets[:, 1]
-                                self.vis_canvas.axes.scatter(x, y,
-                                                           c=collection.get_facecolors() if hasattr(collection, 'get_facecolors') else None,
-                                                           s=collection.get_sizes() if hasattr(collection, 'get_sizes') else None)
-                
-                # 添加图例
-                if self.vis_canvas.axes.get_legend_handles_labels()[0]:
-                    self.vis_canvas.axes.legend()
-                
-                # 设置网格
-                if self.vis_grid.isChecked():
-                    self.vis_canvas.axes.grid(True, linestyle='--', alpha=0.7)
-                
+                    # 网格
+                    if self.vis_grid.isChecked():
+                        self.vis_canvas.axes.grid(True, linestyle='--', alpha=0.7)
+
                 # 更新画布
                 self.vis_canvas.draw()
                 

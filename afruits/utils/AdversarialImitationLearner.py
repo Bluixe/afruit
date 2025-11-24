@@ -46,6 +46,14 @@ class AdversarialImitationLearner:
         self.update_ratio = update_ratio
         self.gp_lambda = gp_lambda
         self.device = device
+
+        # 保存配置以便持久化
+        self.config_to_save = {
+            'gen_learning_rate': self.gen_learning_rate,
+            'disc_learning_rate': self.disc_learning_rate,
+            'update_ratio': self.update_ratio,
+            'gp_lambda': self.gp_lambda
+        }
         
         # 初始化模型和优化器
         self.generator = None
@@ -123,6 +131,14 @@ class AdversarialImitationLearner:
             state_dim = state_dim[0]
         self.state_dim = state_dim
         self.action_dim = action_dim
+
+        # 更新保存配置中的维度信息
+        if not hasattr(self, 'config_to_save'):
+            self.config_to_save = {}
+        self.config_to_save.update({
+            'state_dim': self.state_dim,
+            'action_dim': self.action_dim
+        })
         
         # 验证状态和动作维度
         if not isinstance(self.state_dim, int) or not (1 <= self.state_dim <= 1024):
@@ -415,134 +431,137 @@ class AdversarialImitationLearner:
     
     def evaluate(self, test_env, num_episodes: int = 10) -> Dict:
         """
-        评估函数
+        评估函数（离散动作）
+        
+        更新点:
+        - 使用argmax从动作概率中选出离散动作索引
+        - 若环境提供专家动作(get_expert_action)，计算动作分类准确率accuracy
+        - 保留原有判别器准确率disc_accuracy与其他指标
         
         参数:
-            test_env: 测试环境
+            test_env: 测试环境（可选实现 get_expert_action(obs)->int）
             num_episodes (int): 测试轮次，默认为10
         
         返回值:
-            metrics (Dict): 包含以下评估指标的字典:
-                - disc_accuracy: 判别器准确率（专家/生成行为分类准确率）
-                - policy_jsd: 策略Jensen-Shannon散度
-                - trajectory_overlap: 轨迹重叠度（DTW指标）
-        
-        功能描述:
-            1. 在测试环境中评估训练好的策略
-            2. 计算判别器准确率、策略散度等指标
-            3. 返回评估结果
+            metrics (Dict): 包含以下评估指标:
+                - disc_accuracy: 判别器区分专家/生成行为的准确率
+                - accuracy: 策略动作分类准确率（基于专家动作，若不可用则为None）
+                - policy_jsd: 策略Jensen-Shannon散度（占位）
+                - trajectory_overlap: 轨迹重叠度（占位）
         """
-        # 检查模型是否已训练
-        if not self.is_trained or self.generator is None or self.discriminator is None:
-            raise ValueError("模型尚未训练，请先调用train方法")
-        
-        # 检查状态和动作维度是否已设置
+        # 维度检查
         if self.state_dim is None or self.action_dim is None:
-            raise ValueError("state_dim或action_dim未设置，请先调用train方法")
+            raise ValueError("state_dim或action_dim未设置，请先调用train/build_models方法")
         
-        # 初始化评估指标
         metrics = {
             'disc_accuracy': 0.0,
+            'accuracy': None,
             'policy_jsd': 0.0,
             'trajectory_overlap': 0.0
         }
         
-        # 评估循环
         total_reward = 0.0
+        # 判别器区分准确率统计
         expert_correct = 0
         generated_correct = 0
-        total_samples = 0
+        disc_total = 0
         
-        # 收集生成的轨迹
+        # 策略动作准确率统计
+        correct_predictions = 0
+        total_samples = 0
+        errors = []
+        
         generated_trajectories = []
         
         for episode in range(num_episodes):
-            # 重置环境
             obs = test_env.reset()
             done = False
             episode_reward = 0.0
             trajectory = []
             
             while not done:
-                # 将观测转换为张量
                 obs_tensor = torch.FloatTensor(obs).unsqueeze(0).to(self.device)
                 
-                # 生成动作
+                # 生成离散动作（argmax）
                 with torch.no_grad():
                     action_probs = self.generator(obs_tensor)  # (1, action_dim)
-                    # 从动作概率分布中选择动作
-                    action_idx = torch.argmax(action_probs, dim=1).item()  # 选择概率最高的动作
-                    # 保存动作张量用于后续判别器评估
-                    action_tensor = action_probs
-                    # 创建完整的动作向量（用于环境交互）
+                    action_idx = int(torch.argmax(action_probs, dim=1).item())
+                    action_tensor = action_probs  # for discriminator concatenation
                     action = action_probs.cpu().numpy()[0]
                 
-                # 执行动作 - 使用离散动作索引
+                # 在交互前获取专家动作（若可用），用于分类准确率
+                expert_action_idx = None
+                if hasattr(test_env, 'get_expert_action'):
+                    try:
+                        expert_action_idx = int(test_env.get_expert_action(obs))
+                    except Exception:
+                        expert_action_idx = None
+                
+                # 环境交互（离散索引）
                 next_obs, reward, done, info = test_env.step(action_idx)
                 
-                # 记录轨迹 - 同时保存离散动作索引和动作概率分布
+                # 记录轨迹
                 trajectory.append((obs, action_idx, action))
                 
                 # 累积奖励
-                episode_reward += reward
+                episode_reward += float(reward)
                 
-                # 更新观测
-                obs = next_obs
-                
-                # 评估判别器
+                # 判别器评估（基于当前obs_tensor与action_tensor）
                 with torch.no_grad():
-                    # 真实数据（假设有专家动作）
-                    if hasattr(test_env, 'get_expert_action'):
-                        expert_action_idx = test_env.get_expert_action(obs)  # 获取离散动作索引
-                        # 创建one-hot编码
-                        expert_action = np.zeros(self.action_dim)
-                        expert_action[expert_action_idx] = 1.0
-                        expert_data = torch.cat([
-                            obs_tensor,
-                            torch.FloatTensor(expert_action).unsqueeze(0).to(self.device)
-                        ], dim=1)
+                    # 专家样本
+                    if expert_action_idx is not None:
+                        expert_action_vec = np.zeros(self.action_dim, dtype=np.float32)
+                        expert_action_vec[expert_action_idx] = 1.0
+                        expert_data = torch.cat(
+                            [obs_tensor, torch.from_numpy(expert_action_vec).unsqueeze(0).to(self.device)],
+                            dim=1
+                        )
                         expert_output = self.discriminator(expert_data)
-                        
-                        # 判别器对专家数据的准确率（输出应接近1）
                         if expert_output.item() > 0:
                             expert_correct += 1
                     
-                    # 生成数据
-                    generated_data = torch.cat([
-                        obs_tensor,
-                        action_tensor
-                    ], dim=1)
+                    # 生成样本
+                    generated_data = torch.cat([obs_tensor, action_tensor], dim=1)
                     generated_output = self.discriminator(generated_data)
-                    
-                    # 判别器对生成数据的准确率（输出应接近0）
                     if generated_output.item() <= 0:
                         generated_correct += 1
                     
+                    disc_total += 1
+                
+                # 统计策略动作准确率
+                if expert_action_idx is not None:
+                    errors.append(abs(action_idx - expert_action_idx))
+                    if action_idx == expert_action_idx:
+                        correct_predictions += 1
                     total_samples += 1
+                
+                # 更新观测
+                obs = next_obs
             
-            # 累积总奖励
             total_reward += episode_reward
-            
-            # 保存轨迹
             generated_trajectories.append(trajectory)
         
-        # 计算判别器准确率
+        # 判别器准确率
+        if disc_total > 0:
+            metrics['disc_accuracy'] = (expert_correct + generated_correct) / (2 * disc_total)
+        
+        # 策略分类准确率
         if total_samples > 0:
-            metrics['disc_accuracy'] = (expert_correct + generated_correct) / (2 * total_samples)
+            metrics['accuracy'] = correct_predictions / total_samples
         
-        # 计算策略Jensen-Shannon散度（示例计算方法）
-        # 这里需要专家策略的分布，如果没有，可以使用其他指标
-        metrics['policy_jsd'] = 0.5  # 占位值
+        # 其他占位指标
+        metrics['policy_jsd'] = 0.5
+        metrics['trajectory_overlap'] = 0.6
         
-        # 计算轨迹重叠度（示例计算方法）
-        # 这里需要专家轨迹，如果没有，可以使用其他指标
-        metrics['trajectory_overlap'] = 0.6  # 占位值
-        
-        print(f"评估完成: 判别器准确率 = {metrics['disc_accuracy']:.2f}, 平均奖励 = {total_reward/num_episodes:.2f}")
+        avg_reward = total_reward / max(num_episodes, 1)
+        if metrics['accuracy'] is not None:
+            print(f"评估完成: 平均奖励 = {avg_reward:.2f}, 判别器准确率 = {metrics['disc_accuracy']:.4f}, 策略准确率 = {metrics['accuracy']:.4f}")
+        else:
+            print(f"评估完成: 平均奖励 = {avg_reward:.2f}, 判别器准确率 = {metrics['disc_accuracy']:.4f}, 策略准确率 = N/A")
         
         return metrics
     
-    def save_model(self, path: str) -> None:
+    def save_model(self, save_path = None) -> None:
         """
         保存模型函数
         
@@ -552,59 +571,60 @@ class AdversarialImitationLearner:
         if self.generator is None or self.discriminator is None:
             raise ValueError("模型尚未构建，无法保存")
         
+        if save_path is None:
+            save_path = f"models/gail.pt"
         # 创建目录
-        os.makedirs(os.path.dirname(path), exist_ok=True)
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
         
         # 准备保存数据
-        save_data = {
+        model_state = {
             'generator_state_dict': self.generator.state_dict(),
             'discriminator_state_dict': self.discriminator.state_dict(),
-            'gen_optimizer_state_dict': self.gen_optimizer.state_dict(),
-            'disc_optimizer_state_dict': self.disc_optimizer.state_dict(),
-            'state_dim': self.state_dim,
-            'action_dim': self.action_dim,
-            'gen_learning_rate': self.gen_learning_rate,
-            'disc_learning_rate': self.disc_learning_rate,
-            'update_ratio': self.update_ratio,
-            'gp_lambda': self.gp_lambda
+            'config': {k:v for k,v in self.config_to_save.items()}
         }
         
         # 保存模型
-        torch.save(save_data, path)
+        torch.save(model_state, save_path)
+        import json
+        config_path = os.path.splitext(save_path)[0] + '_config.json'
+        with open(config_path, 'w', encoding='utf-8') as f:
+            json.dump(model_state['config'], f, ensure_ascii=False, indent=4)
         
-        print(f"模型已保存到 {path}")
+        print(f"模型已保存到 {save_path}")
+        print(f"配置已保存至: {config_path}")
     
-    def load_model(self, path: str) -> None:
+    @staticmethod
+    def load_model(load_path, device: torch.device = None) -> 'AdversarialImitationLearner':
         """
         加载模型函数
         
         参数:
             path (str): 模型加载路径
         """
-        if not os.path.exists(path):
-            raise ValueError(f"模型文件 {path} 不存在")
+        if device is None:
+            device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        
+        if load_path is None:
+            load_path = f"models/gail.pt"
         
         # 加载模型
-        checkpoint = torch.load(path, map_location=self.device)
+        checkpoint = torch.load(load_path, map_location=device)
+        config = checkpoint['config']
         
-        # 更新参数
-        self.state_dim = checkpoint['state_dim']
-        self.action_dim = checkpoint['action_dim']
-        self.gen_learning_rate = checkpoint['gen_learning_rate']
-        self.disc_learning_rate = checkpoint['disc_learning_rate']
-        self.update_ratio = checkpoint['update_ratio']
-        self.gp_lambda = checkpoint['gp_lambda']
+        # 创建实例并重建模型
+        model = AdversarialImitationLearner(
+            gen_learning_rate = config['gen_learning_rate'],
+            disc_learning_rate = config['disc_learning_rate'],
+            update_ratio = config['update_ratio'],
+            gp_lambda = config['gp_lambda'],
+            device = device
+        )
         
-        # 重建模型
-        self.build_models(self.state_dim, self.action_dim)
+        model.build_models(config['state_dim'], config['action_dim'])
         
         # 加载模型参数
-        self.generator.load_state_dict(checkpoint['generator_state_dict'])
-        self.discriminator.load_state_dict(checkpoint['discriminator_state_dict'])
-        self.gen_optimizer.load_state_dict(checkpoint['gen_optimizer_state_dict'])
-        self.disc_optimizer.load_state_dict(checkpoint['disc_optimizer_state_dict'])
+        model.generator.load_state_dict(checkpoint['generator_state_dict'])
+        model.discriminator.load_state_dict(checkpoint['discriminator_state_dict'])
         
-        # 标记模型已训练
-        self.is_trained = True
-        
-        print(f"模型已从 {path} 加载")
+        print(f"成功加载模型: {load_path}")
+        return model

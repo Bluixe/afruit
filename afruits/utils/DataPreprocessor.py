@@ -22,54 +22,181 @@ class DataPreprocessor:
         self.norm_method = norm_method
         self.filter_type = filter_type
     
-    def load_data(self, raw_data: Dict, timestamp: List[float] = None, 
+    def load_data(self, raw_data: Dict, timestamp: List[float] = None,
                  position: List[Tuple[float, float, float]] = None,
                  velocity: List[Tuple[float, float, float]] = None,
                  attitude: List[Tuple[float, float, float]] = None) -> Dict:
         """
-        数据加载与预处理函数
+        数据加载与预处理函数（增强版：支持轨迹数据字典）
         
-        参数:
-            raw_data (Dict): 原始输入字典，要求符合以下格式
-            timestamp (List[float], optional): 浮点型时间序列
-            position (List[Tuple[float, float, float]], optional): 三维坐标列表 [x, y, z]
-            velocity (List[Tuple[float, float, float]], optional): 速度值量列表 [vx, vy, vz]
-            attitude (List[Tuple[float, float, float]], optional): 姿态角列表 [roll, pitch, yaw]
-        
-        返回值:
-            Dict: 格式化数据字典
-        
-        功能描述:
-            1. 数据格式验证与时间序列排序
-            2. 执行数据完整性检查与类型转换
-            3. 时间戳重采样与时间序列标准化
+        支持两类输入：
+        1) 传统平铺数据，返回与原逻辑一致的dict
+        2) 轨迹数据:
+           {
+             "state_dim": (D,),
+             "action_dim": K,
+             "trajectories": [
+                 {"states":[T,D], "actions":[T], "rewards":[T], "next_states":[T,D], "dones":[T],
+                  "opponent_actions":[T], "infos":[...](可选)}
+             ]
+           }
+        返回会将列表转为numpy数组，确保dtype与形状一致，便于后续训练/保存。
         """
-        # 格式化数据字典
+        # 若为轨迹数据，进行轨迹级转换
+        if isinstance(raw_data, dict) and 'trajectories' in raw_data:
+            trajs = raw_data.get('trajectories', [])
+            processed_trajs = []
+
+            def _to_int_array(a):
+                arr = np.array(a)
+                # 如果是one-hot，转换为索引
+                if arr.ndim == 2 and arr.shape[-1] > 1 and arr.dtype != np.object_:
+                    return np.argmax(arr, axis=-1).astype(np.int64)
+                # 尝试整型化（兼容浮点整数）
+                if not np.issubdtype(arr.dtype, np.integer):
+                    arr = np.round(arr).astype(np.int64)
+                else:
+                    arr = arr.astype(np.int64)
+                return arr
+
+            for traj in trajs:
+                t_states = np.asarray(traj.get('states', []), dtype=np.float32)
+                t_actions = traj.get('actions', None)
+                t_rewards = traj.get('rewards', None)
+                t_next = traj.get('next_states', None)
+                t_dones = traj.get('dones', None)
+                t_opp = traj.get('opponent_actions', None)
+
+                # 基本校验
+                if t_states is None or len(t_states) == 0:
+                    continue
+
+                T = t_states.shape[0]
+
+                # 动作转整型索引
+                if t_actions is not None:
+                    t_actions = _to_int_array(t_actions)
+                    if t_actions.ndim > 1:
+                        t_actions = t_actions.reshape(-1)
+                    # 裁剪长度一致
+                    if t_actions.shape[0] != T:
+                        T = min(T, t_actions.shape[0])
+                        t_states = t_states[:T]
+                        t_actions = t_actions[:T]
+
+                # next_states
+                if t_next is not None:
+                    t_next = np.asarray(t_next, dtype=np.float32)
+                    if t_next.shape[0] != T:
+                        T = min(T, t_next.shape[0])
+                        t_states = t_states[:T]
+                        if t_actions is not None:
+                            t_actions = t_actions[:T]
+                        t_next = t_next[:T]
+
+                # rewards
+                if t_rewards is not None:
+                    t_rewards = np.asarray(t_rewards, dtype=np.float32)
+                    if t_rewards.shape[0] != T:
+                        T = min(T, t_rewards.shape[0])
+                        t_states = t_states[:T]
+                        if t_actions is not None:
+                            t_actions = t_actions[:T]
+                        if t_next is not None:
+                            t_next = t_next[:T]
+                        t_rewards = t_rewards[:T]
+                else:
+                    t_rewards = np.zeros((T,), dtype=np.float32)
+
+                # dones
+                if t_dones is not None:
+                    t_dones = np.asarray(t_dones, dtype=np.int32)
+                    if t_dones.shape[0] != T:
+                        T = min(T, t_dones.shape[0])
+                        t_states = t_states[:T]
+                        if t_actions is not None:
+                            t_actions = t_actions[:T]
+                        if t_next is not None:
+                            t_next = t_next[:T]
+                        if t_rewards is not None:
+                            t_rewards = t_rewards[:T]
+                        t_dones = t_dones[:T]
+                else:
+                    t_dones = np.zeros((T,), dtype=np.int32)
+
+                # 对手动作
+                if t_opp is not None:
+                    t_opp = _to_int_array(t_opp)
+                    if t_opp.ndim > 1:
+                        t_opp = t_opp.reshape(-1)
+                    if t_opp.shape[0] != T:
+                        T = min(T, t_opp.shape[0])
+                        t_states = t_states[:T]
+                        if t_actions is not None:
+                            t_actions = t_actions[:T]
+                        if t_next is not None:
+                            t_next = t_next[:T]
+                        if t_rewards is not None:
+                            t_rewards = t_rewards[:T]
+                        if t_dones is not None:
+                            t_dones = t_dones[:T]
+                        t_opp = t_opp[:T]
+
+                processed = {
+                    'states': t_states,
+                    'actions': t_actions if t_actions is not None else np.zeros((T,), dtype=np.int64),
+                    'rewards': t_rewards,
+                    'dones': t_dones
+                }
+                if t_next is not None:
+                    processed['next_states'] = t_next
+                if t_opp is not None:
+                    processed['opponent_actions'] = t_opp
+                if 'infos' in traj:
+                    processed['infos'] = traj['infos']
+
+                processed_trajs.append(processed)
+
+            # 维度推断与回填
+            state_dim = raw_data.get('state_dim', None)
+            if state_dim is None:
+                if processed_trajs and 'states' in processed_trajs[0]:
+                    state_dim = (int(processed_trajs[0]['states'].shape[-1]),)
+                else:
+                    state_dim = (0,)
+
+            action_dim = raw_data.get('action_dim', None)
+            if action_dim is None:
+                max_a = 0
+                for tr in processed_trajs:
+                    if 'actions' in tr and tr['actions'] is not None and len(tr['actions']) > 0:
+                        max_a = max(max_a, int(np.max(tr['actions'])))
+                    if 'opponent_actions' in tr and tr['opponent_actions'] is not None and len(tr['opponent_actions']) > 0:
+                        max_a = max(max_a, int(np.max(tr['opponent_actions'])))
+                action_dim = int(max_a + 1) if max_a >= 0 else 0
+
+            return {
+                'trajectories': processed_trajs,
+                'state_dim': state_dim,
+                'action_dim': action_dim,
+                'num_trajectories': len(processed_trajs),
+                'traj_length': int(processed_trajs[0]['states'].shape[0]) if processed_trajs else 0
+            }
+
+        # 否则走旧的键值输入路径
         dict_formatted = {}
-        
-        # 处理原始数据
         if raw_data:
-            # 数据格式验证
-            # 时间序列排序
-            # 这里可以添加更多的数据处理逻辑
             dict_formatted = raw_data
-        
-        # 处理时间戳
+
         if timestamp:
             dict_formatted['timestamp'] = np.array(timestamp)
-        
-        # 处理位置数据
         if position:
             dict_formatted['position'] = np.array(position)
-        
-        # 处理速度数据
         if velocity:
             dict_formatted['velocity'] = np.array(velocity)
-        
-        # 处理姿态角数据
         if attitude:
             dict_formatted['attitude'] = np.array(attitude)
-        
+
         return dict_formatted
     
     def outlier_processing(self, data: Dict, threshold: float = -1, 
@@ -256,32 +383,57 @@ class DataPreprocessor:
     
     def normalize_data(self, data: Dict, norm_method: str = "zscore", feature_ranges: Dict = None) -> Dict:
         """
-        数据标准化处理函数
-        
-        参数:
-            data (Dict): 输入数据字典
-            feature_ranges (Dict, optional): 特征标准化范围，例如 {"velocity": [-5, 5]}
-        
-        返回值:
-            Dict: 标准化后的数据字典
-        
-        功能描述:
-            1. 支持Z-score标准化与Min-Max归一化
-            2. 应用场景：速度、位置等有明确物理意义的特征
-            3. 计算公式：z = (x - μ)/σ 或 z = (x - min)/(max - min)
+        数据标准化处理函数（增强版：支持轨迹结构）
+        - 若输入为轨迹数据字典，则对每条轨迹的states/next_states做归一化
+        - 离散actions/opponent_actions不做归一化
         """
-        # 初始化结果
+        # 轨迹路径
+        if isinstance(data, dict) and 'trajectories' in data:
+            trajs = data.get('trajectories', [])
+            if len(trajs) == 0:
+                return data
+
+            # 统计所有状态的全局统计量
+            states_all = []
+            for tr in trajs:
+                if 'states' in tr and isinstance(tr['states'], np.ndarray):
+                    states_all.append(tr['states'])
+            if len(states_all) == 0:
+                return data
+
+            cat = np.concatenate(states_all, axis=0)  # [sumT, Ds]
+            if norm_method == "minmax":
+                min_vec = np.min(cat, axis=0)
+                max_vec = np.max(cat, axis=0)
+                scale = (max_vec - min_vec)
+                scale[scale == 0] = 1.0
+                for tr in trajs:
+                    if 'states' in tr and isinstance(tr['states'], np.ndarray):
+                        tr['states'] = (tr['states'] - min_vec) / scale
+                    if 'next_states' in tr and isinstance(tr['next_states'], np.ndarray):
+                        tr['next_states'] = (tr['next_states'] - min_vec) / scale
+                data['norm_stats'] = {'type': 'minmax', 'min': min_vec, 'max': max_vec}
+            else:
+                mean = np.mean(cat, axis=0)
+                std = np.std(cat, axis=0)
+                std[std == 0] = 1.0
+                for tr in trajs:
+                    if 'states' in tr and isinstance(tr['states'], np.ndarray):
+                        tr['states'] = (tr['states'] - mean) / std
+                    if 'next_states' in tr and isinstance(tr['next_states'], np.ndarray):
+                        tr['next_states'] = (tr['next_states'] - mean) / std
+                data['norm_stats'] = {'type': 'zscore', 'mean': mean, 'std': std}
+
+            return data
+
+        # 非轨迹路径（保留原有逻辑）
         normalized_data = {}
-        
-        # 对每个数据序列进行标准化
         for key, values in data.items():
             if isinstance(values, np.ndarray) and values.size > 0:
-                # 检查是否有指定的特征范围
                 if feature_ranges and key in feature_ranges:
-                    # Min-Max归一化
+                    # Min-Max归一化（按指定区间映射）
                     min_val, max_val = feature_ranges[key]
                     if len(values.shape) > 1:
-                        # 多维数据
                         normalized_values = np.zeros_like(values, dtype=float)
                         for i in range(values.shape[1]):
                             col_min = np.min(values[:, i])
@@ -289,7 +441,6 @@ class DataPreprocessor:
                             if col_max > col_min:
                                 normalized_values[:, i] = (values[:, i] - col_min) / (col_max - col_min) * (max_val - min_val) + min_val
                     else:
-                        # 一维数据
                         data_min = np.min(values)
                         data_max = np.max(values)
                         if data_max > data_min:
@@ -299,7 +450,6 @@ class DataPreprocessor:
                 else:
                     # Z-score标准化
                     if len(values.shape) > 1:
-                        # 多维数据
                         normalized_values = np.zeros_like(values, dtype=float)
                         for i in range(values.shape[1]):
                             mean = np.mean(values[:, i])
@@ -307,19 +457,16 @@ class DataPreprocessor:
                             if std > 0:
                                 normalized_values[:, i] = (values[:, i] - mean) / std
                     else:
-                        # 一维数据
                         mean = np.mean(values)
                         std = np.std(values)
                         if std > 0:
                             normalized_values = (values - mean) / std
                         else:
                             normalized_values = np.zeros_like(values, dtype=float)
-                
                 normalized_data[key] = normalized_values
             else:
-                # 非数组数据，直接复制
                 normalized_data[key] = values
-        
+
         return normalized_data
 
     def preprocess_for_training(self, raw_data: Dict, model_type: str) -> Dict:

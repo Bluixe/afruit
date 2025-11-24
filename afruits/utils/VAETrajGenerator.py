@@ -603,6 +603,88 @@ class VAETrajGenerator:
                     'latent_codes': z.cpu().numpy()
                 }
     
+    def evaluate(self, dataloader: DataLoader) -> Dict:
+        """
+        评估（离散动作）：
+        - 当 has_separate_action=True 且 discrete_action=True 时：
+          使用 decoder 输出的动作 logits，通过 argmax 得到离散动作索引，并计算分类准确率
+        - 同时计算状态重构误差与动作交叉熵损失
+        - 其他情况（无动作或连续动作）仅返回状态重构损失，accuracy 为 None
+        
+        参数:
+            dataloader (DataLoader): 评估数据加载器（应提供 (states, actions) 或单一 trajectories）
+        
+        返回:
+            Dict:
+                loss: 平均总损失
+                state_recon_loss: 平均状态重构损失（若可计算）
+                action_loss: 平均动作交叉熵损失（若可计算）
+                accuracy: 动作分类准确率（若可计算）
+        """
+        self.encoder.eval()
+        self.decoder.eval()
+        total_loss = 0.0
+        total_state_loss = 0.0
+        total_action_loss = 0.0
+        correct = 0
+        total = 0
+
+        with torch.no_grad():
+            for batch in dataloader:
+                if len(batch) == 2 and getattr(self, 'has_separate_action', False):
+                    states = batch[0].to(self.device)
+                    actions = batch[1].to(self.device).long()
+                    # 前向计算
+                    mu, logvar = self.encoder(states, actions)
+                    z = self.reparameterize(mu, logvar)
+                    outputs = self.decoder(z)
+                    if isinstance(outputs, tuple):
+                        recon_states, action_logits = outputs
+                    else:
+                        recon_states, action_logits = outputs, None
+
+                    # 状态重构损失
+                    state_loss = F.mse_loss(recon_states, states)
+                    action_loss = None
+
+                    # 动作交叉熵与准确率（离散）
+                    if getattr(self, 'discrete_action', False) and action_logits is not None:
+                        logits = action_logits.reshape(-1, self.action_dim)
+                        labels = actions.reshape(-1)
+                        action_loss = F.cross_entropy(logits, labels)
+                        preds = torch.argmax(logits, dim=-1)
+                        correct += (preds == labels).sum().item()
+                        total += labels.numel()
+                        loss = state_loss + action_loss
+                    else:
+                        loss = state_loss
+
+                    total_state_loss += state_loss.item()
+                    if action_loss is not None:
+                        total_action_loss += action_loss.item()
+                    total_loss += loss.item()
+                else:
+                    # 旧格式或无动作：仅状态重构评估
+                    trajectories = batch[0].to(self.device)
+                    mu, logvar = self.encoder(trajectories)
+                    z = self.reparameterize(mu, logvar)
+                    recon = self.decoder(z)
+                    loss = F.mse_loss(recon, trajectories)
+                    total_loss += loss.item()
+
+        n_batches = max(len(dataloader), 1)
+        results = {
+            'loss': total_loss / n_batches,
+            'state_recon_loss': (total_state_loss / n_batches) if total_state_loss > 0 else None,
+            'action_loss': (total_action_loss / n_batches) if total_action_loss > 0 else None,
+            'accuracy': (correct / total) if total > 0 else None
+        }
+        if results['accuracy'] is not None:
+            print(f"VAE评估: Loss={results['loss']:.4f}, Acc={results['accuracy']:.4f}")
+        else:
+            print(f"VAE评估: Loss={results['loss']:.4f}, Acc=N/A")
+        return results
+
     def save_model(self, save_path = None) -> None:
         """
         保存模型参数和配置

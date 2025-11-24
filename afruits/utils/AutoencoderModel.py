@@ -130,7 +130,7 @@ class AutoencoderModel(nn.Module):
             # LSTM解码器
             self.decoder = nn.LSTM(
                 input_size=self.latent_dim,
-                hidden_size=input_dim,
+                hidden_size=self.latent_dim,
                 num_layers=2,
                 batch_first=True,
                 dropout=self.dropout_rate,
@@ -138,7 +138,8 @@ class AutoencoderModel(nn.Module):
             )
             
             # 输出层
-            self.output_layer = nn.Linear(input_dim, input_dim)
+            # 将解码器隐状态映射回输入维度
+            self.output_layer = nn.Linear(self.latent_dim, input_dim)
             
             # 隐空间映射（双向LSTM输出到单向输入）
             self.hidden_map = nn.Linear(self.latent_dim * 2, self.latent_dim)
@@ -237,8 +238,8 @@ class AutoencoderModel(nn.Module):
         
         if self.encoder_type == "lstm":
             # 准备初始隐状态
-            h0 = torch.zeros((2, batch_size, self.input_dim)).to(device)
-            c0 = torch.zeros((2, batch_size, self.input_dim)).to(device)
+            h0 = torch.zeros((2, batch_size, self.latent_dim)).to(device)
+            c0 = torch.zeros((2, batch_size, self.latent_dim)).to(device)
             
             # 重复隐空间表示以创建输入序列
             z_seq = z.unsqueeze(1).repeat(1, seq_len, 1)
@@ -400,6 +401,12 @@ class AutoencoderTrainer:
             AutoencoderModel: 构建好的模型
         """
         self.model.build_model(input_dim, action_dim, seq_length)
+        # 训练/保存需要的关键维度
+        self.config_to_save.update({
+            'input_dim': input_dim,
+            'action_dim': action_dim,
+            'seq_length': seq_length
+        })
         return self.model
     
     def load_sequences(self, raw_data, batch_size=32, mode="train_test"):
@@ -480,7 +487,8 @@ class AutoencoderTrainer:
             
             # 验证
             if val_loader is not None:
-                val_loss = self.evaluate(val_loader)
+                val_results = self.evaluate(val_loader)
+                val_loss = val_results['loss'] if isinstance(val_results, dict) else float(val_results)
                 history['val_loss'].append(val_loss)
                 
                 print(f'Epoch {epoch+1}/{epochs}, Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}')
@@ -599,7 +607,6 @@ class AutoencoderTrainer:
         model_trainer = AutoencoderTrainer(
             encoder_type=config.get('encoder_type', 'lstm'),
             latent_dim=config.get('latent_dim', 32),
-            seq_length=config.get('seq_length', 100),
             kl_weight=config.get('kl_weight', 0.001),
             dropout_rate=config.get('dropout_rate', 0.2)
         )

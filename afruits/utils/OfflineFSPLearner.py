@@ -40,6 +40,14 @@ class OfflineFSPLearner:
         self.cql_penalty_weight = cql_penalty_weight
         self.exposure_ratio = exposure_ratio
         self.importance_beta = importance_beta
+
+        # 保存配置以便模型持久化
+        self.config_to_save = {
+            'strategy_pool_size': self.strategy_pool_size,
+            'cql_penalty_weight': self.cql_penalty_weight,
+            'exposure_ratio': self.exposure_ratio,
+            'importance_beta': self.importance_beta
+        }
         
         # 初始化模型和优化器
         self.network = None
@@ -91,10 +99,6 @@ class OfflineFSPLearner:
         # 初始化结果
         weighted_dataset = {}
         
-        # 检查输入数据
-        if not raw_trajectories or not isinstance(raw_trajectories, dict):
-            raise ValueError("raw_trajectories必须是非空列表")
-        
         # 处理轨迹数据
         states = []
         actions = []
@@ -103,36 +107,62 @@ class OfflineFSPLearner:
         next_states = []
         dones = []
         sample_weights = []
+
+        if isinstance(raw_trajectories, list):
+
+            for trajectory in raw_trajectories:
+                
+                # 提取数据
+                traj_states = trajectory['states']
+                traj_actions = trajectory['actions']
+                traj_opponent_actions = trajectory['opponent_actions']
+                traj_rewards = trajectory['rewards']
+                traj_next_states = trajectory['next_states']
+                traj_dones = trajectory['dones']
+                
+                # 计算重要性权重
+                traj_weights = self._compute_importance_weights(traj_states, traj_actions, traj_rewards)
+                
+                # 添加到数据集
+                states.extend(traj_states)
+                actions.extend(traj_actions)
+                opponent_actions.extend(traj_opponent_actions)
+                rewards.extend(traj_rewards)
+                next_states.extend(traj_next_states)
+                dones.extend(traj_dones)
+                sample_weights.extend(traj_weights)
+
+        elif isinstance(raw_trajectories, dict):
         
-        for traj_id, trajectory in raw_trajectories.items():
-            # 检查轨迹数据是否包含必要字段
-            if not all(key in trajectory for key in ['states', 'actions', 'opponent_actions', 'rewards', 'next_states', 'dones']):
-                print("警告: 轨迹缺少必要数据字段，已跳过")
-                continue
-            
-            # 检查对手ID是否匹配
-            if 'opponent_id' in trajectory and trajectory['opponent_id'] != opponent_id:
-                continue
-            
-            # 提取数据
-            traj_states = trajectory['states']
-            traj_actions = trajectory['actions']
-            traj_opponent_actions = trajectory['opponent_actions']
-            traj_rewards = trajectory['rewards']
-            traj_next_states = trajectory['next_states']
-            traj_dones = trajectory['dones']
-            
-            # 计算重要性权重
-            traj_weights = self._compute_importance_weights(traj_states, traj_actions, traj_rewards)
-            
-            # 添加到数据集
-            states.extend(traj_states)
-            actions.extend(traj_actions)
-            opponent_actions.extend(traj_opponent_actions)
-            rewards.extend(traj_rewards)
-            next_states.extend(traj_next_states)
-            dones.extend(traj_dones)
-            sample_weights.extend(traj_weights)
+            for traj_id, trajectory in raw_trajectories.items():
+                # 检查轨迹数据是否包含必要字段
+                if not all(key in trajectory for key in ['states', 'actions', 'opponent_actions', 'rewards', 'next_states', 'dones']):
+                    print("警告: 轨迹缺少必要数据字段，已跳过")
+                    continue
+                
+                # 检查对手ID是否匹配
+                if 'opponent_id' in trajectory and trajectory['opponent_id'] != opponent_id:
+                    continue
+                
+                # 提取数据
+                traj_states = trajectory['states']
+                traj_actions = trajectory['actions']
+                traj_opponent_actions = trajectory['opponent_actions']
+                traj_rewards = trajectory['rewards']
+                traj_next_states = trajectory['next_states']
+                traj_dones = trajectory['dones']
+                
+                # 计算重要性权重
+                traj_weights = self._compute_importance_weights(traj_states, traj_actions, traj_rewards)
+                
+                # 添加到数据集
+                states.extend(traj_states)
+                actions.extend(traj_actions)
+                opponent_actions.extend(traj_opponent_actions)
+                rewards.extend(traj_rewards)
+                next_states.extend(traj_next_states)
+                dones.extend(traj_dones)
+                sample_weights.extend(traj_weights)
         
         # 转换为numpy数组
         if states:
@@ -198,8 +228,18 @@ class OfflineFSPLearner:
             2. 策略网络：对手模型输入 → Transformer编码层 → 双头策略/价值输出
         """
         if type(input_dim) == tuple:
-            assert len(input_dim) == 1, "仅支持一维输入" 
+            assert len(input_dim) == 1, "仅支持一维输入"
             input_dim = input_dim[0]
+
+        # 记录维度并更新保存配置
+        self.state_dim = input_dim
+        self.action_dim = action_dim
+        if not hasattr(self, 'config_to_save'):
+            self.config_to_save = {}
+        self.config_to_save.update({
+            'state_dim': self.state_dim,
+            'action_dim': self.action_dim
+        })
             
         # 创建Q网络
         self.network = nn.Sequential(
@@ -501,9 +541,9 @@ class OfflineFSPLearner:
             4. monitor_matrix: 策略互交关系矩阵
             5. trajectory_samples: 典型对抗轨迹片段
         """
-        # 检查模型是否已训练
-        if not self.is_trained or self.policy_network is None:
-            raise ValueError("模型尚未训练，请先调用fictitious_play方法")
+        # # 检查模型是否已训练
+        # if not self.is_trained or self.policy_network is None:
+        #     raise ValueError("模型尚未训练，请先调用fictitious_play方法")
         
         # 初始化评估指标
         metrics = {
@@ -569,7 +609,77 @@ class OfflineFSPLearner:
         # 返回一个轨迹样本列表
         return [{"states": [], "actions": [], "rewards": []} for _ in range(num_samples)]
     
-    def save_model(self, path: str) -> None:
+    def evaluate(self, dataloader: DataLoader) -> Dict:
+        """
+        评估策略网络（离散动作）
+        - 使用policy_network对输入状态输出logits
+        - 通过argmax得到离散动作索引
+        - 计算交叉熵损失与分类准确率
+
+        参数:
+            dataloader (DataLoader): 提供 (states, actions, ...) 的数据加载器
+
+        返回:
+            Dict:
+                loss: 平均交叉熵损失
+                accuracy: 分类准确率
+        """
+        if self.policy_network is None:
+            raise ValueError("policy_network未构建，请先调用build_network")
+
+        self.policy_network.eval()
+        criterion = nn.CrossEntropyLoss()
+
+        total_loss = 0.0
+        correct = 0
+        total = 0
+
+        with torch.no_grad():
+            for batch in dataloader:
+                # 允许dataloader包含更多字段，但前两个应为 states 和 actions
+                states = batch[0]
+                actions = batch[1].long()
+
+                logits = self.policy_network(states)
+                loss = criterion(logits, actions)
+
+                total_loss += loss.item()
+
+                preds = torch.argmax(logits, dim=-1)
+                correct += (preds == actions).sum().item()
+                total += actions.numel()
+
+        avg_loss = total_loss / max(len(dataloader), 1)
+        accuracy = (correct / total) if total > 0 else 0.0
+        print(f"Off-FSP评估: Loss={avg_loss:.4f}, Accuracy={accuracy:.4f}")
+        return {"loss": avg_loss, "accuracy": accuracy}
+
+    def predict(self, states: Union[np.ndarray, torch.Tensor]) -> np.ndarray:
+        """
+        预测动作（离散）：
+        - 使用policy_network输出logits后取argmax，返回离散动作索引
+
+        参数:
+            states: [batch, feat] 的numpy或torch张量
+
+        返回:
+            np.ndarray: 预测的离散动作索引
+        """
+        if self.policy_network is None:
+            raise ValueError("policy_network未构建，请先调用build_network")
+
+        self.policy_network.eval()
+
+        if isinstance(states, np.ndarray):
+            states_tensor = torch.from_numpy(states).float()
+        else:
+            states_tensor = states.float()
+
+        with torch.no_grad():
+            logits = self.policy_network(states_tensor)
+            preds = torch.argmax(logits, dim=-1).cpu().numpy()
+        return preds
+    def save_model(self, save_path = None) -> None:
         """
         保存模型函数
         
@@ -579,75 +689,61 @@ class OfflineFSPLearner:
         if self.network is None or self.policy_network is None or self.opponent_model is None:
             raise ValueError("模型尚未构建，无法保存")
         
+        if save_path is None:
+            save_path = f"models/off_fsp.pt"
         # 创建目录
-        os.makedirs(os.path.dirname(path), exist_ok=True)
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
         
         # 准备保存数据
-        save_data = {
+        model_state = {
             'network_state_dict': self.network.state_dict(),
             'policy_network_state_dict': self.policy_network.state_dict(),
             'opponent_model_state_dict': self.opponent_model.state_dict(),
-            'optimizer_state_dict': self.optimizer.state_dict(),
-            'policy_optimizer_state_dict': self.policy_optimizer.state_dict(),
-            'opponent_optimizer_state_dict': self.opponent_optimizer.state_dict(),
-            'strategy_pool_size': self.strategy_pool_size,
-            'cql_penalty_weight': self.cql_penalty_weight,
-            'exposure_ratio': self.exposure_ratio,
-            'importance_beta': self.importance_beta
+            'config': {k:v for k,v in self.config_to_save.items()}
         }
         
-        # 如果已训练，保存策略池
-        if self.is_trained and hasattr(self, 'strategy_pool'):
-            save_data['strategy_pool'] = [strategy.state_dict() for strategy in self.strategy_pool]
-        
         # 保存模型
-        torch.save(save_data, path)
+        torch.save(model_state, save_path)
+        import json
+        config_path = os.path.splitext(save_path)[0] + '_config.json'
+        with open(config_path, 'w', encoding='utf-8') as f:
+            json.dump(model_state['config'], f, ensure_ascii=False, indent=4)
         
-        print(f"模型已保存到 {path}")
+        print(f"模型已保存到 {save_path}")
+        print(f"配置已保存至: {config_path}")
     
-    def load_model(self, path: str) -> None:
+    @staticmethod
+    def load_model(load_path, device: torch.device = None) -> 'OfflineFSPLearner':
         """
         加载模型函数
         
         参数:
             path (str): 模型加载路径
         """
-        if not os.path.exists(path):
-            raise ValueError(f"模型文件 {path} 不存在")
+        if device is None:
+            device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        
+        if load_path is None:
+            load_path = f"models/off_fsp.pt"
         
         # 加载模型
-        checkpoint = torch.load(path)
+        checkpoint = torch.load(load_path, map_location=device)
+        config = checkpoint['config']
         
-        # 更新参数
-        self.strategy_pool_size = checkpoint['strategy_pool_size']
-        self.cql_penalty_weight = checkpoint['cql_penalty_weight']
-        self.exposure_ratio = checkpoint['exposure_ratio']
-        self.importance_beta = checkpoint['importance_beta']
+        # 创建实例并重建网络
+        model = OfflineFSPLearner(
+            strategy_pool_size = config['strategy_pool_size'],
+            cql_penalty_weight = config['cql_penalty_weight'],
+            exposure_ratio = config['exposure_ratio'],
+            importance_beta = config['importance_beta']
+        )
         
-        # 重建模型
-        # 这里假设输入维度和动作维度可以从模型状态字典中推断
-        # 实际应用中可能需要额外的参数
-        self.build_network(64, 10)  # 示例维度
+        model.build_network(config['state_dim'], config['action_dim'])
         
-        # 加载模型参数
-        self.network.load_state_dict(checkpoint['network_state_dict'])
-        self.policy_network.load_state_dict(checkpoint['policy_network_state_dict'])
-        self.opponent_model.load_state_dict(checkpoint['opponent_model_state_dict'])
+        # 加载参数
+        model.network.load_state_dict(checkpoint['network_state_dict'])
+        model.policy_network.load_state_dict(checkpoint['policy_network_state_dict'])
+        model.opponent_model.load_state_dict(checkpoint['opponent_model_state_dict'])
         
-        # 加载优化器参数
-        self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-        self.policy_optimizer.load_state_dict(checkpoint['policy_optimizer_state_dict'])
-        self.opponent_optimizer.load_state_dict(checkpoint['opponent_optimizer_state_dict'])
-        
-        # 如果有策略池，加载策略池
-        if 'strategy_pool' in checkpoint:
-            self.strategy_pool = []
-            for strategy_state_dict in checkpoint['strategy_pool']:
-                strategy = copy.deepcopy(self.policy_network)
-                strategy.load_state_dict(strategy_state_dict)
-                self.strategy_pool.append(strategy)
-            
-            # 标记模型已训练
-            self.is_trained = True
-        
-        print(f"模型已从 {path} 加载")
+        print(f"成功加载模型: {load_path}")
+        return model

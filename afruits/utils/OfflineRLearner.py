@@ -58,7 +58,7 @@ class OfflineRLearner:
         self.action_dim = None  # 需要在preprocess_data时设置
         self.cql_weight = cql_weight
         self.vae_hidden_dim = vae_hidden_dim
-        self.perturbation_scale = perturbation_scale
+        self.perturbation_scale = 0
         self.replay_ratio = replay_ratio
         self.num_quantiles = num_quantiles
         self.discount_factor = discount_factor
@@ -66,6 +66,18 @@ class OfflineRLearner:
         self.target_update_freq = target_update_freq
         self.reward_normalization = reward_normalization
         self.device = device
+
+        self.config_to_save = {
+            'cql_weight': cql_weight,
+            'vae_hidden_dim': vae_hidden_dim,
+            'perturbation_scale': perturbation_scale,
+            'replay_ratio': replay_ratio,
+            'num_quantiles': num_quantiles,
+            'discount_factor': discount_factor,
+            'estimation_step': estimation_step,
+            'target_update_freq': target_update_freq,
+            'reward_normalization': reward_normalization,
+        }
         
         # 初始化模型和优化器
         self.model = None
@@ -116,55 +128,98 @@ class OfflineRLearner:
         buffer = ReplayBuffer(size=100000)
         
         # 处理轨迹数据
-        for traj_id, trajectory in raw_trajectories.items():
-            # 检查轨迹数据是否包含状态、动作和奖励
-            if 'states' not in trajectory or 'actions' not in trajectory or 'rewards' not in trajectory:
-                print(f"警告: 轨迹 {traj_id} 缺少状态、动作或奖励数据，已跳过")
-                continue
-            
-            states = trajectory['states']
-            actions = trajectory['actions']
-            rewards = trajectory['rewards']
+        if isinstance(raw_trajectories, list):
+            for trajectory in raw_trajectories:
+                
+                states = np.array(trajectory['states'])
+                actions = np.array(trajectory['actions'])
+                rewards = np.array(trajectory['rewards'])
 
-            if self.state_dim is None:
-                assert len(states.shape) == 2, "状态数据必须为二维数组 (时间步长, 状态维度)"
-                self.state_dim = states.shape[1]
-            if self.action_dim is None:
-                self.action_dim = int(np.max(actions)) + 1  # 假设动作是从0开始的整数
-            
-            # 检查数据长度是否匹配
-            if not (len(states) == len(actions) == len(rewards)):
-                print(f"警告: 轨迹 {traj_id} 的状态、动作和奖励数据长度不匹配，已跳过")
-                continue
-            
-            # 添加数据到ReplayBuffer
-            for i in range(len(states) - 1):
-                # 当前状态、动作、奖励
-                obs = states[i]
-                act = actions[i]
-                rew = rewards[i]
+                if self.state_dim is None:
+                    assert len(states.shape) == 2, "状态数据必须为二维数组 (时间步长, 状态维度)"
+                    self.state_dim = states.shape[1]
+                if self.action_dim is None:
+                    self.action_dim = int(np.max(actions)) + 1  # 假设动作是从0开始的整数
                 
-                # 下一个状态
-                obs_next = states[i + 1]
-                
-                # 判断是否为终止状态
-                done = False
-                if i == len(states) - 2:  # 最后一个转换
-                    done = True
+                # 添加数据到ReplayBuffer
+                for i in range(len(states) - 1):
+                    # 当前状态、动作、奖励
+                    obs = states[i]
+                    act = actions[i]
+                    rew = rewards[i]
+                    
+                    # 下一个状态
+                    obs_next = states[i + 1]
+                    
+                    # 判断是否为终止状态
+                    done = False
+                    if i == len(states) - 2:  # 最后一个转换
+                        done = True
 
+                    
+                    # 添加到buffer
+                    buffer.add(
+                        Batch(
+                        obs=torch.tensor(obs).float(),
+                        act=torch.tensor(act).long(),
+                        rew=rew,
+                        done=done,
+                        terminated=done,
+                        truncated=done,
+                        obs_next=torch.tensor(obs_next).float(),
+                        info={})
+                    )
+        
+        elif isinstance(raw_trajectories, dict):
+            for traj_id, trajectory in raw_trajectories.items():
+                # 检查轨迹数据是否包含状态、动作和奖励
+                if 'states' not in trajectory or 'actions' not in trajectory or 'rewards' not in trajectory:
+                    print(f"警告: 轨迹 {traj_id} 缺少状态、动作或奖励数据，已跳过")
+                    continue
                 
-                # 添加到buffer
-                buffer.add(
-                    Batch(
-                    obs=torch.tensor(obs).float(),
-                    act=torch.tensor(act).long(),
-                    rew=rew,
-                    done=done,
-                    terminated=done,
-                    truncated=done,
-                    obs_next=torch.tensor(obs_next).float(),
-                    info={})
-                )
+                states = trajectory['states']
+                actions = trajectory['actions']
+                rewards = trajectory['rewards']
+
+                if self.state_dim is None:
+                    assert len(states.shape) == 2, "状态数据必须为二维数组 (时间步长, 状态维度)"
+                    self.state_dim = states.shape[1]
+                if self.action_dim is None:
+                    self.action_dim = int(np.max(actions)) + 1  # 假设动作是从0开始的整数
+                
+                # 检查数据长度是否匹配
+                if not (len(states) == len(actions) == len(rewards)):
+                    print(f"警告: 轨迹 {traj_id} 的状态、动作和奖励数据长度不匹配，已跳过")
+                    continue
+                
+                # 添加数据到ReplayBuffer
+                for i in range(len(states) - 1):
+                    # 当前状态、动作、奖励
+                    obs = states[i]
+                    act = actions[i]
+                    rew = rewards[i]
+                    
+                    # 下一个状态
+                    obs_next = states[i + 1]
+                    
+                    # 判断是否为终止状态
+                    done = False
+                    if i == len(states) - 2:  # 最后一个转换
+                        done = True
+
+                    
+                    # 添加到buffer
+                    buffer.add(
+                        Batch(
+                        obs=torch.tensor(obs).float(),
+                        act=torch.tensor(act).long(),
+                        rew=rew,
+                        done=done,
+                        terminated=done,
+                        truncated=done,
+                        obs_next=torch.tensor(obs_next).float(),
+                        info={})
+                    )
         
         print(f"数据预处理完成: 共添加 {len(buffer)} 条数据到ReplayBuffer")
         return buffer
@@ -188,6 +243,11 @@ class OfflineRLearner:
             "n_embd": 128,
             "dropout": 0.1
         }
+
+        self.config_to_save.update({
+            'state_dim': state_dim,
+            'action_dim': action_dim
+        })
 
         if type(state_dim) == tuple:
             self.state_dim = state_dim[0]
@@ -327,7 +387,7 @@ class OfflineRLearner:
             if np.random.random() < self.replay_ratio:
                 try:
                     # 更新策略
-                    result = self.policy.update(batch_size, buffer)
+                    result = self.policy.update(batch_size, buffer, self.device)
                     
                     # 记录损失值
                     history['loss'].append(result['loss'])
@@ -365,78 +425,100 @@ class OfflineRLearner:
     
     def evaluate(self, test_env, num_episodes: int = 10) -> Dict:
         """
-        评估函数
+        评估函数（离散动作）
+        
+        更新点:
+        - 使用argmax从Q值(logits)中选出离散动作
+        - 在可用情况下（环境提供专家动作）计算分类准确率accuracy
         
         参数:
-            test_env: 测试环境
+            test_env: 测试环境（可选实现 get_expert_action(obs)->int）
             num_episodes (int): 测试轮次，默认为10
         
         返回值:
-            metrics (Dict): 包含以下评估指标的字典:
+            metrics (Dict): 包含以下评估指标:
                 - avg_reward: 平均奖励
                 - success_rate: 成功率
                 - safety_margin: 安全边界系数
-        
-        功能描述:
-            1. 在测试环境中评估训练好的策略
-            2. 计算平均奖励、成功率等指标
-            3. 返回评估结果
+                - accuracy: 分类准确率（若环境不提供expert动作则为None）
         """
-        # 检查模型是否已训练
-        if not self.is_trained or self.policy is None:
-            raise ValueError("模型尚未训练，请先调用train方法")
-        
         # 初始化评估指标
         metrics = {
             'avg_reward': 0.0,
             'success_rate': 0.0,
-            'safety_margin': 0.0
+            'safety_margin': 0.0,
+            'accuracy': None
         }
         
-        # 评估循环
         total_reward = 0.0
         success_count = 0
         
+        # 分类准确率统计
+        correct_predictions = 0
+        total_samples = 0
+        errors = []
+        
         for episode in range(num_episodes):
-            # 重置环境
             obs = test_env.reset()
             done = False
             episode_reward = 0.0
             
             while not done:
-                # 选择动作
-                act = self.policy.step(obs, self.device)
+                # 获取专家动作（如果环境提供）
+                expert_action = None
+                if hasattr(test_env, 'get_expert_action'):
+                    try:
+                        expert_action = int(test_env.get_expert_action(obs))
+                    except Exception:
+                        expert_action = None
                 
-                # 执行动作
-                obs_next, rew, done, info = test_env.step(act)
+                # 基于当前模型/策略选取离散动作（argmax）
+                try:
+                    # 优先使用Q网络的argmax
+                    obs_tensor = torch.tensor(obs, dtype=torch.float32).unsqueeze(0)
+                    if hasattr(self, 'device'):
+                        obs_tensor = obs_tensor.to(self.device)
+                    with torch.no_grad():
+                        q_values = self.model(obs_tensor)  # [1, action_dim]
+                        act_idx = int(torch.argmax(q_values, dim=-1).item())
+                except Exception:
+                    # 回退到策略接口
+                    act_idx = int(self.policy.step(obs, self.device))
                 
-                # 累积奖励
-                episode_reward += rew
+                # 交互环境（离散action索引）
+                obs_next, rew, done, info = test_env.step(act_idx)
                 
-                # 更新观测
+                # 统计accuracy（仅在有专家动作时）
+                if expert_action is not None:
+                    error = abs(act_idx - expert_action)
+                    errors.append(error)
+                    if act_idx == expert_action:
+                        correct_predictions += 1
+                    total_samples += 1
+                
+                # 奖励与状态更新
+                episode_reward += float(rew)
                 obs = obs_next
             
-            # 累积总奖励
             total_reward += episode_reward
-            
-            # 判断是否成功
             if 'success' in info and info['success']:
                 success_count += 1
         
-        # 计算平均奖励
-        metrics['avg_reward'] = total_reward / num_episodes
+        # 聚合指标
+        metrics['avg_reward'] = total_reward / max(num_episodes, 1)
+        metrics['success_rate'] = success_count / max(num_episodes, 1)
+        metrics['safety_margin'] = 0.8 * metrics['success_rate'] + 0.2 * (metrics['avg_reward'] / 100.0)
         
-        # 计算成功率
-        metrics['success_rate'] = success_count / num_episodes
-        
-        # 计算安全边界系数（示例计算方法）
-        metrics['safety_margin'] = 0.8 * metrics['success_rate'] + 0.2 * (metrics['avg_reward'] / 100)
-        
-        print(f"评估完成: 平均奖励 = {metrics['avg_reward']:.2f}, 成功率 = {metrics['success_rate']:.2f}")
+        # 计算准确率
+        if total_samples > 0:
+            metrics['accuracy'] = correct_predictions / total_samples
+            print(f"评估完成: 平均奖励 = {metrics['avg_reward']:.2f}, 成功率 = {metrics['success_rate']:.2f}, 准确率 = {metrics['accuracy']:.4f}")
+        else:
+            print(f"评估完成: 平均奖励 = {metrics['avg_reward']:.2f}, 成功率 = {metrics['success_rate']:.2f}, 准确率 = N/A (未提供专家动作)")
         
         return metrics
     
-    def save_model(self, path: str) -> None:
+    def save_model(self, save_path = None) -> None:
         """
         保存模型函数
         
@@ -446,76 +528,63 @@ class OfflineRLearner:
         if self.policy is None:
             raise ValueError("模型尚未构建，无法保存")
         
+        if save_path is None:
+            # 默认保存路径
+            save_path = f"models/offline_rl.pt"
         # 创建目录
-        os.makedirs(os.path.dirname(path), exist_ok=True)
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
         
-        # 判断是否使用BCQ算法
-        is_bcq = hasattr(self, 'vae') and self.perturbation_scale > 0
         
         # 准备保存数据
-        save_data = {
+        model_state = {
             'model_state_dict': self.model.state_dict(),
             'policy_state_dict': self.policy.state_dict() if hasattr(self.policy, 'state_dict') else None,
-            'optimizer_state_dict': self.optimizer.state_dict(),
-            'state_dim': self.state_dim,
-            'action_dim': self.action_dim,
-            'cql_weight': self.cql_weight,
-            'vae_hidden_dim': self.vae_hidden_dim,
-            'perturbation_scale': self.perturbation_scale,
-            'replay_ratio': self.replay_ratio,
-            'num_quantiles': self.num_quantiles,
-            'discount_factor': self.discount_factor,
-            'is_bcq': is_bcq
+            'config': {k:v for k,v in self.config_to_save.items()}
         }
         
-        # 如果使用BCQ算法，保存VAE模型
-        if is_bcq:
-            save_data['vae_state_dict'] = self.vae.state_dict()
-            save_data['vae_optimizer_state_dict'] = self.vae_optimizer.state_dict()
-        
         # 保存模型
-        torch.save(save_data, path)
+        torch.save(model_state, save_path)
+        import json
+        config_path = os.path.splitext(save_path)[0] + '_config.json'
+        with open(config_path, 'w', encoding='utf-8') as f:
+            json.dump(model_state['config'], f, ensure_ascii=False, indent=4)
         
-        print(f"模型已保存到 {path}")
+        print(f"模型已保存到 {save_path}")
     
-    def load_model(self, path: str) -> None:
+    @staticmethod
+    def load_model(load_path, device: torch.device = None) -> 'OfflineRLearner':
         """
         加载模型函数
         
         参数:
             path (str): 模型加载路径
         """
-        if not os.path.exists(path):
-            raise ValueError(f"模型文件 {path} 不存在")
+        if device is None:
+            device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        
+        if load_path is None:
+            load_path = f"models/offline_rl.pt"
         
         # 加载模型
-        checkpoint = torch.load(path, map_location=self.device)
+        checkpoint = torch.load(load_path, map_location=device)
+        config = checkpoint['config']
+
+        model = OfflineRLearner(
+            cql_weight = config['cql_weight'],
+            vae_hidden_dim = config['vae_hidden_dim'],
+            perturbation_scale = config['perturbation_scale'],
+            replay_ratio = config['replay_ratio'],
+            num_quantiles = config['num_quantiles'],
+            discount_factor = config['discount_factor'],
+            estimation_step = config['estimation_step'],
+            target_update_freq = config['target_update_freq'],
+            reward_normalization = config['reward_normalization'],
+            device = device
+        )
+
+        model.build_model(config['state_dim'], config['action_dim'])
         
-        # 更新参数
-        self.state_dim = checkpoint['state_dim']
-        self.action_dim = checkpoint['action_dim']
-        self.cql_weight = checkpoint['cql_weight']
-        self.vae_hidden_dim = checkpoint.get('vae_hidden_dim', 256)  # 默认值为256
-        self.perturbation_scale = checkpoint.get('perturbation_scale', 0.05)  # 默认值为0.05
-        self.replay_ratio = checkpoint.get('replay_ratio', 0.8)  # 默认值为0.8
-        self.num_quantiles = checkpoint['num_quantiles']
-        self.discount_factor = checkpoint['discount_factor']
-        
-        # 重建模型
-        self.build_model()
-        
-        # 加载模型参数
-        self.model.load_state_dict(checkpoint['model_state_dict'])
-        if checkpoint['policy_state_dict'] is not None and hasattr(self.policy, 'load_state_dict'):
-            self.policy.load_state_dict(checkpoint['policy_state_dict'])
-        self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-        
-        # 如果是BCQ模型，加载VAE参数
-        if checkpoint.get('is_bcq', False) and hasattr(self, 'vae'):
-            self.vae.load_state_dict(checkpoint['vae_state_dict'])
-            self.vae_optimizer.load_state_dict(checkpoint['vae_optimizer_state_dict'])
-        
-        # 标记模型已训练
-        self.is_trained = True
-        
-        print(f"模型已从 {path} 加载")
+        model.model.load_state_dict(checkpoint['model_state_dict'])
+        model.policy.load_state_dict(checkpoint['policy_state_dict'])
+
+        return model

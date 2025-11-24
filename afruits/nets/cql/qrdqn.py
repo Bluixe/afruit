@@ -57,7 +57,7 @@ class QRDQNPolicy(DQNPolicy):
 
     def _target_q(self, buffer: ReplayBuffer, indices: np.ndarray) -> torch.Tensor:
         batch = buffer[indices]  # batch.obs_next: s_{t+n}
-        batch.to_torch(device="cuda")
+        # batch.to_torch(device="cuda")
         if self._target:
             act = self(batch, input="obs_next").act
             next_dist = self(batch, model="model_old", input="obs_next").logits

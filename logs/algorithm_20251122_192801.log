@@ -1,0 +1,7 @@
+2025-11-22 19:28:01 - algorithm - INFO - 日志服务初始化完成，日志文件: logs/algorithm_20251122_192801.log
+2025-11-22 19:28:01 - algorithm - INFO - 初始化API，使用设备: cpu
+2025-11-22 19:28:01 - algorithm - INFO - 小样本博弈建模服务初始化完成，使用设备: cpu
+2025-11-22 19:28:01 - algorithm - INFO - 小样本专家轨迹模仿学习服务初始化完成，使用设备: cpu
+2025-11-22 19:28:01 - algorithm - INFO - 可视化服务初始化完成，保存目录: visualizations
+2025-11-22 19:28:01 - algorithm - INFO - API初始化完成
+2025-11-22 19:28:01 - afruits_app - INFO - 应用程序初始化完成

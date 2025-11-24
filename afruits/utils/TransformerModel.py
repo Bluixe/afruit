@@ -351,7 +351,7 @@ class TransformerTrainer:
         """
         # 优化器
         self.model.to(self.device)
-        optimizer = torch.optim.Adam(self.model.parameters(), lr=learning_rate)
+        optimizer = torch.optim.Adam(self.model.parameters(), lr=0.001)
         
         # 损失函数 - 交叉熵损失用于分类任务
         criterion = nn.CrossEntropyLoss()
@@ -395,10 +395,10 @@ class TransformerTrainer:
             
             # 验证
             if val_loader is not None:
-                val_loss = self.evaluate(val_loader, criterion)
+                val_metrics = self.evaluate(val_loader, criterion)
+                val_loss = float(val_metrics.get('eval_loss', 0.0))
                 history['val_loss'].append(val_loss)
-                
-                print(f'Epoch {epoch+1}/{epochs}, Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}')
+                print(f'Epoch {epoch+1}/{epochs}, Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}, Val Acc: {val_metrics.get("accuracy", 0.0):.4f}')
             else:
                 print(f'Epoch {epoch+1}/{epochs}, Train Loss: {train_loss:.4f}')
         
@@ -406,53 +406,138 @@ class TransformerTrainer:
     
     def evaluate(self, data_loader, criterion=None):
         """
-        评估模型
+        评估模型（离散动作，增强指标版）
+        - 指标对齐 BehaviorCloner.evaluate_policy
+        - 计算交叉熵损失与分类准确率
+        - 额外指标：mean_abs_error, error_distribution(兼容旧版), per_action_accuracy,
+                  action_hist, action_entropy, action_switch_rate, unique_actions_ratio
         
         参数:
             data_loader (DataLoader): 数据加载器
-            criterion (nn.Module, optional): 损失函数
+            criterion (nn.Module, optional): 损失函数（默认CrossEntropyLoss）
             
         返回:
-            float: 评估损失
+            dict: 指标字典
+                  {
+                    accuracy, eval_loss, mean_abs_error, error_distribution,
+                    per_action_accuracy, action_hist, action_entropy,
+                    action_switch_rate, unique_actions_ratio
+                  }
         """
         if criterion is None:
             criterion = nn.CrossEntropyLoss()
+
+        import torch.nn.functional as F
         
         # 评估模式
         self.model.eval()
         eval_loss = 0.0
+
+        total_samples = 0
+        correct_predictions = 0
+        all_abs_errors = []
+        per_class_correct = {}
+        per_class_total = {}
+        hist_counts = {}
+        total_switches = 0
+        total_switch_den = 0
+        entropies = []
+        predicted_unique_actions = set()
         
         with torch.no_grad():
             for batch in data_loader:
-                # 前向传播
-                pred_actions = self.model(batch)
+                # 前向传播得到logits: [B, T, A] 或 [N, A]
+                logits = self.model(batch)
                 
-                # 获取真实动作
-                true_actions = batch[1].to(self.device)
-                
-                # 重塑预测和真实动作以适应损失函数
-                true_actions = true_actions.reshape(-1).long()
-                pred_actions = pred_actions.reshape(-1, self.model.action_dim)
-                
-                # 计算损失
-                loss = criterion(pred_actions, true_actions)
-                
+                # 真实动作（保持原始序列形状以供序列指标使用）
+                true_actions_seq = batch[1].to(self.device)
+
+                # 展平用于交叉熵损失
+                if logits.dim() == 3:
+                    B, T, A = logits.shape
+                    logits_flat = logits.reshape(-1, A)
+                    true_flat = true_actions_seq.view(-1).long()
+                else:
+                    N, A = logits.shape
+                    logits_flat = logits.view(-1, A)
+                    true_flat = true_actions_seq.view(-1).long()
+
+                # 损失
+                loss = criterion(logits_flat, true_flat)
                 eval_loss += loss.item()
+
+                # 预测与准确率
+                preds_flat = torch.argmax(logits_flat, dim=-1)
+                correct_predictions += (preds_flat == true_flat).sum().item()
+                total_samples += true_flat.numel()
+
+                # 绝对误差、类别直方图与每类统计
+                for pr, gt in zip(preds_flat.tolist(), true_flat.tolist()):
+                    pr_i, gt_i = int(pr), int(gt)
+                    all_abs_errors.append(abs(pr_i - gt_i))
+                    if pr_i == gt_i:
+                        per_class_correct[gt_i] = per_class_correct.get(gt_i, 0) + 1
+                    per_class_total[gt_i] = per_class_total.get(gt_i, 0) + 1
+                    hist_counts[pr_i] = hist_counts.get(pr_i, 0) + 1
+                    predicted_unique_actions.add(pr_i)
+
+                # 信息熵：-sum p log p
+                probs_flat = F.softmax(logits_flat, dim=-1).clamp(min=1e-12)
+                entropy_flat = (-probs_flat * probs_flat.log()).sum(dim=-1)
+                entropies.extend(entropy_flat.detach().cpu().numpy().tolist())
+
+                # 动作切换率（序列场景）
+                if logits.dim() == 3 and T > 1:
+                    preds_seq = preds_flat.view(B, T)
+                    switches = (preds_seq[:, 1:] != preds_seq[:, :-1]).sum().item()
+                    total_switches += int(switches)
+                    total_switch_den += int(B * (T - 1))
         
-        # 计算平均评估损失
-        eval_loss /= len(data_loader)
+        # 平均评估损失
+        eval_loss /= max(len(data_loader), 1)
         
-        return eval_loss
+        # 准确率
+        accuracy = float(correct_predictions / total_samples) if total_samples > 0 else 0.0
+        
+        # 汇总指标
+        metrics = {
+            'accuracy': accuracy,
+            'eval_loss': float(eval_loss),
+            'mean_abs_error': float(np.mean(all_abs_errors)) if all_abs_errors else 0.0,
+            'error_distribution': float(np.mean(all_abs_errors)) if all_abs_errors else 0.0,  # 兼容旧版（标量）
+            'action_hist': {int(k): int(v) for k, v in hist_counts.items()},
+            'action_entropy': float(np.mean(entropies)) if entropies else 0.0,
+            'action_switch_rate': float(total_switches / total_switch_den) if total_switch_den > 0 else 0.0,
+        }
+        
+        # 唯一动作比率
+        try:
+            action_space = int(getattr(self.model, 'action_dim', 0))
+            if action_space <= 0 and len(hist_counts) > 0:
+                action_space = int(max(hist_counts.keys())) + 1
+            metrics['unique_actions_ratio'] = float(len(predicted_unique_actions) / action_space) if action_space > 0 else 0.0
+        except Exception:
+            metrics['unique_actions_ratio'] = 0.0
+        
+        # 各类别准确率
+        per_action_acc = {}
+        for cls, tot in per_class_total.items():
+            cor = per_class_correct.get(cls, 0)
+            per_action_acc[int(cls)] = float(cor / tot) if tot > 0 else 0.0
+        metrics['per_action_accuracy'] = per_action_acc
+        
+        return metrics
     
     def predict(self, states):
         """
-        预测动作
+        预测动作（离散）：
+        - 返回离散动作索引（通过对logits执行argmax）
         
         参数:
-            states (torch.Tensor): 状态序列
+            states (torch.Tensor): 状态序列（支持批/序列）
             
         返回:
-            torch.Tensor: 预测的动作概率
+            np.ndarray: 离散动作索引（形状与输入序列维度匹配）
         """
         # 评估模式
         self.model.eval()
@@ -483,13 +568,14 @@ class TransformerTrainer:
             # 创建批次
             batch = [states, dummy_actions]
             
-            # 前向传播
-            pred_actions = self.model(batch)
+            # 前向传播得到logits
+            logits = self.model(batch)
             
-            # 获取预测的动作概率
-            action_probs = torch.softmax(pred_actions, dim=-1)
+            # 取argmax得到离散动作索引
+            action_indices = torch.argmax(logits, dim=-1)
             
-            return action_probs
+            # 返回CPU numpy数组，便于后续评估/统计
+            return action_indices.detach().cpu().numpy()
         
     def save_model(self, save_path = None) -> None:
         """

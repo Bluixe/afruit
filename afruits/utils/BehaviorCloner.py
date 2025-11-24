@@ -39,6 +39,13 @@ class BehaviorCloner:
         self.network_type = network_type
         self.max_epochs = max_epochs
         self.dropout_rate = dropout_rate
+
+        self.config_to_save = {
+            'batch_size': self.batch_size,
+            'network_type': self.network_type,
+            'max_epochs': self.max_epochs,
+            'dropout_rate': self.dropout_rate
+        }
         
         # 初始化模型和优化器
         self.model = None
@@ -70,6 +77,46 @@ class BehaviorCloner:
         # 验证dropout_rate
         if not isinstance(self.dropout_rate, float) or not (0.0 <= self.dropout_rate <= 0.5):
             raise ValueError(f"dropout_rate必须在0.0-0.5范围内，当前值: {self.dropout_rate}")
+
+    def build_model(self, state_dim, action_dim):
+        self.config_to_save.update({
+            'state_dim': state_dim,
+            'action_dim': action_dim
+        })
+        if isinstance(state_dim, tuple) and len(state_dim) == 1:
+            input_dim = state_dim[0]
+        else:
+            input_dim = state_dim
+        self.input_dim = input_dim
+        output_dim = action_dim
+        self.output_dim = output_dim
+        if isinstance(input_dim, int) and input_dim > 0:
+            # 创建MLP模型
+            self.model = nn.Sequential(
+                nn.Flatten(),
+                nn.Linear(input_dim, 128),
+                nn.ReLU(),
+                nn.Dropout(self.dropout_rate),
+                nn.Linear(128, 64),
+                nn.ReLU(),
+                nn.Dropout(self.dropout_rate),
+                nn.Linear(64, output_dim)
+            )
+        elif isinstance(input_dim, tuple) and len(input_dim) == 3:
+            # 创建CNN模型
+            self.model = nn.Sequential(
+                nn.Conv2d(input_dim[0], 16, kernel_size=3, stride=1, padding=1),
+                nn.ReLU(),
+                nn.MaxPool2d(kernel_size=2, stride=2),
+                nn.Conv2d(16, 32, kernel_size=3, stride=1, padding=1),
+                nn.ReLU(),
+                nn.MaxPool2d(kernel_size=2, stride=2),
+                nn.Flatten(),
+                nn.Linear(32 * (input_dim[1]//4) * (input_dim[3]//4), 64),
+                nn.ReLU(),
+                nn.Dropout(self.dropout_rate),
+                nn.Linear(64, output_dim)
+            )
     
     def process_data(self, raw_trajectories: Dict, context_frames: int = 4) -> Tuple[np.ndarray, np.ndarray]:
         """
@@ -189,34 +236,6 @@ class BehaviorCloner:
         if type(input_dim) == tuple:
             input_dim = np.prod(input_dim)
         # 创建模型
-        if self.network_type == "MLP":
-            # 创建MLP模型
-            self.model = nn.Sequential(
-                nn.Flatten(),
-                nn.Linear(input_dim, 128),
-                nn.ReLU(),
-                nn.Dropout(self.dropout_rate),
-                nn.Linear(128, 64),
-                nn.ReLU(),
-                nn.Dropout(self.dropout_rate),
-                nn.Linear(64, output_dim)
-            )
-        elif self.network_type == "CNN":
-            # 创建CNN模型
-            assert len(X_train.shape) == 4, "CNN模式下输入数据必须为4维张量 (样本数, 通道数, 高度, 宽度)"
-            self.model = nn.Sequential(
-                nn.Conv2d(X_train.shape[1], 16, kernel_size=3, stride=1, padding=1),
-                nn.ReLU(),
-                nn.MaxPool2d(kernel_size=2, stride=2),
-                nn.Conv2d(16, 32, kernel_size=3, stride=1, padding=1),
-                nn.ReLU(),
-                nn.MaxPool2d(kernel_size=2, stride=2),
-                nn.Flatten(),
-                nn.Linear(32 * (X_train.shape[2]//4) * (X_train.shape[3]//4), 64),
-                nn.ReLU(),
-                nn.Dropout(self.dropout_rate),
-                nn.Linear(64, output_dim)
-            )
         
         # 创建优化器
         self.optimizer = optim.Adam(self.model.parameters(), lr=0.001)
@@ -277,95 +296,197 @@ class BehaviorCloner:
     
     def evaluate_policy(self, test_trajectories: List, simulator: Any = None) -> Dict:
         """
-        策略评估函数
+        策略评估函数（增强版）
         
         参数:
             test_trajectories (List): 测试轨迹数据集
             simulator (Any, optional): 数字孪生仿真环境
         
         返回值:
-            metrics (Dict): 包含以下评估指标的字典:
-                - action_accuracy: 动作预测准确率（数值动作）
-                - error_distribution: 各维度误差分布（连续动作）
-        
-        功能描述:
-            1. 计算测试集上的预测误差指标
-            2. 在仿真环境中执行策略并记录表现
-            3. 动态评估：计算测试集上的预测误差指标
-            4. 在跟踪中：在仿真环境中执行策略并记录表现
+            metrics (Dict): 评估指标字典，兼容旧键并新增多样性/分布相关指标:
+                - accuracy / action_accuracy: 总体分类准确率
+                - mean_abs_error: 平均绝对误差（基于离散动作索引）
+                - error_distribution: 绝对误差平均值（与旧实现保持兼容）
+                - per_action_accuracy: 各类别准确率
+                - action_hist: 预测动作直方图（计数）
+                - action_entropy: 预测分布平均信息熵
+                - action_switch_rate: 连续时刻动作切换率
+                - unique_actions_ratio: 预测到的唯一动作比率
         """
-        # 检查模型是否已训练
-        if not self.is_trained or self.model is None:
-            raise ValueError("模型尚未训练，请先调用train_model方法")
-        
-        # 初始化评估指标
-        metrics = {
-            'action_accuracy': 0.0,
-            'error_distribution': []
-        }
-        
-        # 检查测试轨迹
         if not test_trajectories:
             raise ValueError("test_trajectories不能为空")
         
-        # 设置模型为评估模式
         self.model.eval()
         
-        # 处理测试轨迹
+        # 全局统计
         total_samples = 0
         correct_predictions = 0
-        errors = []
+        all_abs_errors: List[float] = []
+        per_class_correct = {}
+        per_class_total = {}
+        hist_counts = {}
+        total_switches = 0
+        total_switch_den = 0  # 累计 (T-1)
+        entropies: List[float] = []
+        predicted_unique_actions = set()
+        
+        import torch.nn.functional as F
         
         for trajectory in test_trajectories:
-            # 检查轨迹数据是否包含状态和动作
             if 'states' not in trajectory or 'actions' not in trajectory:
                 print("警告: 轨迹缺少状态或动作数据，已跳过")
                 continue
             
-            states = trajectory['states']
-            actions = trajectory['actions']
-            
-            # 检查状态和动作数据长度是否匹配
+            states = np.asarray(trajectory['states'])
+            actions = np.asarray(trajectory['actions']).reshape(-1)
             if len(states) != len(actions):
                 print("警告: 轨迹的状态和动作数据长度不匹配，已跳过")
                 continue
             
-            # 转换为PyTorch张量
+            # 前向预测
             states_tensor = torch.FloatTensor(states)
-            
-            # 使用模型进行预测
             with torch.no_grad():
-                predicted_actions = self.model(states_tensor).numpy()
+                logits = self.model(states_tensor)  # [T, A]
+                if isinstance(logits, torch.Tensor):
+                    probs = F.softmax(logits, dim=-1)
+                    preds = torch.argmax(probs, dim=-1).cpu().numpy().astype(int)
+                    # 信息熵：-sum p log p
+                    entropy_seq = (-probs * (probs.clamp(min=1e-12)).log()).sum(dim=-1).cpu().numpy()
+                else:
+                    # 兼容非Tensor返回
+                    logits_np = np.asarray(logits)
+                    preds = logits_np.argmax(axis=-1)
+                    # 简单softmax以继续熵的计算
+                    e_x = np.exp(logits_np - logits_np.max(axis=-1, keepdims=True))
+                    probs_np = e_x / np.clip(e_x.sum(axis=-1, keepdims=True), 1e-12, None)
+                    entropy_seq = -(probs_np * np.log(np.clip(probs_np, 1e-12, None))).sum(axis=-1)
             
-            # 计算预测准确率
+            # 统计切换率
+            if len(preds) > 1:
+                switches = np.sum(preds[1:] != preds[:-1])
+                total_switches += int(switches)
+                total_switch_den += (len(preds) - 1)
+            
+            # 样本级统计
             for i in range(len(actions)):
-                # 计算预测误差
-                error = np.abs(predicted_actions[i] - actions[i])
-                errors.append(error)
-                
-                # 如果误差小于阈值，则认为预测正确
-                if np.mean(error) < 0.1:  # 使用0.1作为阈值
-                    correct_predictions += 1
-                
+                gt = int(actions[i])
+                pr = int(preds[i])
+                all_abs_errors.append(abs(pr - gt))
                 total_samples += 1
+                if pr == gt:
+                    correct_predictions += 1
+                    per_class_correct[gt] = per_class_correct.get(gt, 0) + 1
+                per_class_total[gt] = per_class_total.get(gt, 0) + 1
+                hist_counts[pr] = hist_counts.get(pr, 0) + 1
+                predicted_unique_actions.add(pr)
+            
+            # 累计熵
+            if entropy_seq is not None and len(entropy_seq) > 0:
+                entropies.extend(list(np.asarray(entropy_seq).reshape(-1)))
         
-        # 计算总体准确率
-        if total_samples > 0:
-            metrics['action_accuracy'] = correct_predictions / total_samples
+        # 汇总指标
+        metrics: Dict[str, Any] = {
+            'accuracy': float(correct_predictions / total_samples) if total_samples > 0 else 0.0,
+            'mean_abs_error': float(np.mean(all_abs_errors)) if all_abs_errors else 0.0,
+            'error_distribution': float(np.mean(all_abs_errors)) if all_abs_errors else 0.0,  # 兼容旧版本（标量）
+            'action_hist': {int(k): int(v) for k, v in hist_counts.items()},
+            'action_entropy': float(np.mean(entropies)) if entropies else 0.0,
+            'action_switch_rate': float(total_switches / total_switch_den) if total_switch_den > 0 else 0.0,
+        }
         
-        # 计算误差分布
-        if errors:
-            errors = np.array(errors)
-            metrics['error_distribution'] = np.mean(errors, axis=0)
+        # 唯一动作比率
+        try:
+            action_space = int(getattr(self, 'output_dim', 0)) if hasattr(self, 'output_dim') else 0
+            if action_space <= 0 and len(hist_counts) > 0:
+                action_space = int(max(hist_counts.keys())) + 1
+            metrics['unique_actions_ratio'] = float(len(predicted_unique_actions) / action_space) if action_space > 0 else 0.0
+        except Exception:
+            metrics['unique_actions_ratio'] = 0.0
         
-        # 在仿真环境中评估（如果提供）
+        # 各类别准确率
+        per_action_acc = {}
+        for cls, tot in per_class_total.items():
+            cor = per_class_correct.get(cls, 0)
+            per_action_acc[int(cls)] = float(cor / tot) if tot > 0 else 0.0
+        metrics['per_action_accuracy'] = per_action_acc
+        
+        # 仿真指标（可选）
         if simulator is not None:
-            # 这里应该实现在仿真环境中的评估
-            # 简化示例：假设simulator有一个evaluate方法
             try:
                 sim_metrics = simulator.evaluate(self.model)
-                metrics.update(sim_metrics)
+                if isinstance(sim_metrics, dict):
+                    metrics.update(sim_metrics)
             except Exception as e:
                 print(f"仿真评估失败: {str(e)}")
         
         return metrics
+
+    def save_model(self, save_path = None) -> None:
+
+        """
+        保存模型函数
+        
+        参数:
+            path (str): 模型保存路径
+        """
+
+        
+        if save_path is None:
+            # 默认保存路径
+            save_path = f"models/bc.pt"
+        # 创建目录
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
+
+        model_state = {
+            'state_dict': self.model.state_dict(),
+            'config': {k:v for k,v in self.config_to_save.items()}
+        }
+
+        torch.save(model_state, save_path)
+        import json
+        config_path = os.path.splitext(save_path)[0] + '_config.json'
+        with open(config_path, 'w', encoding='utf-8') as f:
+            json.dump(model_state['config'], f, ensure_ascii=False, indent=4)
+            
+        print(f"模型已保存至: {save_path}")
+        print(f"配置已保存至: {config_path}")
+
+    @staticmethod
+    def load_model(load_path, device: torch.device = None) -> 'BehaviorCloner':
+        """
+        静态方法：加载模型参数和配置，返回TransformerModel实例
+        
+        参数:
+            load_path (str): 模型加载路径
+            device (torch.device, optional): 计算设备
+            
+        返回值:
+            TransformerModel实例
+        """
+        if device is None:
+            device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        
+        if load_path is None:
+            load_path = f"models/bc.pt"
+        
+        # 加载模型状态
+        checkpoint = torch.load(load_path, map_location=device)
+        config = checkpoint['config']
+        
+        # 创建TransformerModel实例
+        model = BehaviorCloner(
+            batch_size = config['batch_size'],
+            network_type = config['network_type'],
+            max_epochs = config['max_epochs'],
+            dropout_rate = config['dropout_rate']
+        )
+        
+        # 构建模型
+        model.build_model(config['state_dim'], config['action_dim'])
+        
+        # 加载模型参数
+        model.model.load_state_dict(checkpoint['state_dict'])
+        
+        print(f"成功加载模型: {load_path}")
+        
+        return model

@@ -253,7 +253,7 @@ class BasePolicy(ABC, nn.Module):
         if hasattr(buffer, "update_weight") and hasattr(batch, "weight"):
             buffer.update_weight(indices, batch.weight)
 
-    def update(self, sample_size: int, buffer: Optional[ReplayBuffer],
+    def update(self, sample_size: int, buffer: Optional[ReplayBuffer], device='cpu',
                **kwargs: Any) -> Dict[str, Any]:
         """Update the policy network and replay buffer.
 
@@ -274,7 +274,7 @@ class BasePolicy(ABC, nn.Module):
         batch, indices = buffer.sample(sample_size)
         # print(batch)
         self.updating = True
-        batch.to_torch(device="cuda")
+        batch.to_torch(device=device)
         batch = self.process_fn(batch, buffer, indices)
         result = self.learn(batch, **kwargs)
         self.post_process_fn(batch, buffer, indices)
