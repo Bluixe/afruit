@@ -212,6 +212,7 @@ class EvolutionaryLearner:
         # 使用TransformerTrainer的evaluate方法进行评估
         criterion = nn.CrossEntropyLoss()
         loss = policy.evaluate(self.data_loader, criterion)
+        loss = loss['eval_loss']
         
         # 将损失转换为适应度分数（负损失，越高越好）
         fitness_score = -loss

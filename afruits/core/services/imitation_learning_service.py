@@ -21,6 +21,8 @@ from utils.FineTuneManager import FineTuneManager
 # 导入模仿学习模块
 from utils.AdversarialImitationLearner import AdversarialImitationLearner
 
+from loguru import logger
+
 class ImitationLearningService:
     """
     小样本专家轨迹模仿学习服务类
@@ -454,6 +456,8 @@ class ImitationLearningService:
         if model_type == 'AutoencoderModel':
             base_model = AutoencoderTrainer.load_model(model_path)
         elif model_type == 'TransformerModel':
+            model_path = "models/TransformerModel.pt"
+            logger.info(f"Load model from {model_path}")
             base_model = TransformerTrainer.load_model(model_path)
         elif model_type == 'DiffusionTrajGenerator':
             base_model = DiffusionTrajGenerator.load_model(model_path)
@@ -510,6 +514,8 @@ class ImitationLearningService:
         if model_type == 'AutoencoderModel':
             base_model = AutoencoderTrainer.load_model(model_path)
         elif model_type == 'TransformerModel':
+            model_path = "models/TransformerModel.pt"
+            logger.info(f"Load model from {model_path}")
             base_model = TransformerTrainer.load_model(model_path)
         elif model_type == 'DiffusionTrajGenerator':
             base_model = DiffusionTrajGenerator.load_model(model_path)

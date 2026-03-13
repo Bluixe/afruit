@@ -215,7 +215,7 @@ class GameModelingService:
         cql_penalty_weight = model_config.get('cql_penalty_weight', 0.7)
         exposure_ratio = model_config.get('exposure_ratio', 0.6)
         importance_beta = model_config.get('importance_beta', 0.5)
-        num_iterations = model_config.get('num_iterations', 20)
+        num_iterations = model_config.get('num_iterations', 10)
         
         # 创建模型
         model = OfflineFSPLearner(

@@ -1,0 +1,6 @@
+{
+  "num_trajectories": 1000,
+  "state_dim": [
+    12
+  ],
+  "action_dim": 

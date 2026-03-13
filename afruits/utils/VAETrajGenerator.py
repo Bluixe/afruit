@@ -683,7 +683,7 @@ class VAETrajGenerator:
             print(f"VAE评估: Loss={results['loss']:.4f}, Acc={results['accuracy']:.4f}")
         else:
             print(f"VAE评估: Loss={results['loss']:.4f}, Acc=N/A")
-        return results
+        return 00
 
     def save_model(self, save_path = None) -> None:
         """

@@ -10,7 +10,7 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QTabWidget, QWidget, QVB
                             QHBoxLayout, QPushButton, QLabel, QFileDialog, QComboBox,
                             QTextEdit, QGroupBox, QFormLayout, QSpinBox, QDoubleSpinBox,
                             QCheckBox, QTableWidget, QTableWidgetItem, QSplitter,
-                            QMessageBox, QProgressBar, QLineEdit, QInputDialog)
+                            QMessageBox, QProgressBar, QLineEdit, QInputDialog, QDialog)
 from PyQt5.QtCore import Qt, QThread, pyqtSignal
 from PyQt5.QtGui import QFont, QIcon
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
@@ -107,6 +107,53 @@ class TrainingThread(QThread):
             self.update_status.emit(f"训练失败: {str(e)}")
             logger.error(f"训练失败: {str(e)}\n{error_traceback}")
 
+class ModuleSelectionDialog(QDialog):
+    """模块选择对话框（引导界面）"""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("模块选择")
+        self.setModal(True)
+        self.selected_module = None
+
+        layout = QVBoxLayout(self)
+
+        title = QLabel("请选择需要进入的模块")
+        title.setAlignment(Qt.AlignCenter)
+        try:
+            title.setFont(QFont("Arial", 14, QFont.Bold))
+        except Exception:
+            pass
+        layout.addWidget(title)
+
+        # sub = QLabel("该界面仅为引导，任意选择都会进入相同主界面")
+        # sub.setAlignment(Qt.AlignCenter)
+        # layout.addWidget(sub)
+
+        btn_layout = QHBoxLayout()
+        self.btn_game_modeling = QPushButton("小样本博弈建模模块")
+        self.btn_imitation = QPushButton("小样本专家轨迹模仿学习模块")
+
+        # 放大按钮便于点击
+        for b in (self.btn_game_modeling, self.btn_imitation):
+            b.setMinimumHeight(40)
+            b.setMinimumWidth(200)
+
+        self.btn_game_modeling.clicked.connect(lambda: self._choose("小样本博弈建模模块"))
+        self.btn_imitation.clicked.connect(lambda: self._choose("小样本专家轨迹模仿学习模块"))
+
+        btn_layout.addStretch(1)
+        btn_layout.addWidget(self.btn_game_modeling)
+        btn_layout.addSpacing(20)
+        btn_layout.addWidget(self.btn_imitation)
+        btn_layout.addStretch(1)
+
+        layout.addLayout(btn_layout)
+
+    def _choose(self, name: str):
+        self.selected_module = name
+        self.accept()
+
+
 class MainWindow(QMainWindow):
     """主窗口类"""
     def __init__(self):
@@ -141,13 +188,22 @@ class MainWindow(QMainWindow):
         
     def init_ui(self):
         """初始化用户界面"""
-        self.setWindowTitle("算法小样本快速升级迭代训练软件")
+        self.setWindowTitle("算法小样本快速升级迭代训练软件-v1.0")
         self.setGeometry(100, 100, 1200, 800)
         
         # 创建中央部件和主布局
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
         main_layout = QVBoxLayout(central_widget)
+
+        # 顶部工具栏：返回模块选择
+        top_bar = QHBoxLayout()
+        back_btn = QPushButton("返回模块选择")
+        # back_btn.setToolTip("返回引导界面（不改变当前配置）")
+        back_btn.clicked.connect(self.show_module_selection)
+        top_bar.addStretch(1)
+        top_bar.addWidget(back_btn)
+        main_layout.addLayout(top_bar)
         
         # 创建选项卡部件
         self.tabs = QTabWidget()
@@ -164,6 +220,30 @@ class MainWindow(QMainWindow):
         
         # 显示窗口
         self.show()
+
+    def show_module_selection(self):
+        """弹出模块选择引导界面（在显示期间隐藏主界面）"""
+        try:
+            # 隐藏主窗口
+            self.hide()
+            dialog = ModuleSelectionDialog(self)
+            result = dialog.exec_()
+            if result == QDialog.Accepted:
+                selected = getattr(dialog, 'selected_module', None)
+                if selected:
+                    logger.info(f"返回模块选择（用户选择）: {selected}")
+            else:
+                logger.info("返回模块选择：用户取消选择，恢复主界面")
+        except Exception as e:
+            logger.error(f"显示模块选择界面失败: {str(e)}")
+        finally:
+            # 恢复主窗口显示
+            self.show()
+            try:
+                self.raise_()
+                self.activateWindow()
+            except Exception:
+                pass
 
     def create_trajectory_data(self, model_type):
 
@@ -290,8 +370,13 @@ class MainWindow(QMainWindow):
         preprocess_layout.addRow("", self.normalize_check)
         
         # 预处理按钮
-        preprocess_btn = QPushButton("执行预处理")
+        preprocess_btn = QPushButton("博弈轨迹数据的统一标准化处理")
         preprocess_btn.clicked.connect(self.preprocess_data)
+        preprocess_layout.addRow("", preprocess_btn)
+
+        # 长序列预处理和数据增强
+        preprocess_btn = QPushButton("长序列轨迹处理和数据增强")
+        preprocess_btn.clicked.connect(self.preprocess_and_enhance_data)
         preprocess_layout.addRow("", preprocess_btn)
         
         # 预处理状态
@@ -320,6 +405,25 @@ class MainWindow(QMainWindow):
         # 模型选择部分
         model_group = QGroupBox("模型选择")
         model_layout = QFormLayout()
+        
+        # 功能选择栏（新增）
+        self.function_combo = QComboBox()
+        self.function_combo.addItems([
+            "请选择功能",
+            "对手建模功能",
+            "对抗模仿学习功能",
+            "离线强化学习功能",
+            "离线自对弈学习功能",
+            "轨迹编码功能",
+            "轨迹Transformer功能",
+            "扩散轨迹生成功能",
+            "VAE轨迹生成功能",
+            "进化学习功能",
+            "增量学习功能",
+            "小样本微调功能"
+        ])
+        self.function_combo.currentIndexChanged.connect(self.on_function_selected)
+        model_layout.addRow("功能选择:", self.function_combo)
         
         # 模型类型选择
         self.model_category_combo = QComboBox()
@@ -543,25 +647,23 @@ class MainWindow(QMainWindow):
         
         # 可视化类型选择
         vis_type_group = QGroupBox("可视化类型")
-        vis_type_layout = QHBoxLayout()
+        vis_type_layout = QFormLayout()
         
-        vis_type_layout.addWidget(QLabel("选择类型:"))
-        self.vis_type_combo = QComboBox()
-        self.vis_type_combo.addItems([
-            "line", 
-            "bar", 
-            # "scatter", 
-            # "heatmap", 
-            "3d",
-            "trajectory", 
-            "traj_heatmap", 
-            "action_hist", 
-            "radar",
-            # "distribution", 
-            # "comparison", 
-            # "embedding"
+        # 可视化分类选择（新增）
+        self.vis_category_combo = QComboBox()
+        self.vis_category_combo.addItems([
+            "请选择分类",
+            "轨迹可视化",
+            "对比评估",
+            "评估策略多样性",
+            "多指标评估"
         ])
-        vis_type_layout.addWidget(self.vis_type_combo)
+        self.vis_category_combo.currentIndexChanged.connect(self.on_vis_category_selected)
+        vis_type_layout.addRow("可视化功能:", self.vis_category_combo)
+        
+        # 具体类型选择
+        self.vis_type_combo = QComboBox()
+        vis_type_layout.addRow("选择类型:", self.vis_type_combo)
         
         vis_type_group.setLayout(vis_type_layout)
         layout.addWidget(vis_type_group)
@@ -619,6 +721,128 @@ class MainWindow(QMainWindow):
         if category in self.available_models:
             models = self.available_models[category]
             self.model_type_combo.addItems(models.keys())
+    
+    def on_vis_category_selected(self, index):
+        """处理可视化分类选择，自动更新可视化类型选项"""
+        if index == 0:  # "请选择分类"
+            self.vis_type_combo.clear()
+            return
+        
+        # 可视化分类到类型的映射
+        vis_category_configs = {
+            "轨迹可视化": ["3d", "trajectory", "traj_heatmap"],
+            "对比评估": ["line", "bar"],
+            "评估策略多样性": ["action_hist"],
+            "多指标评估": ["radar"]
+        }
+        
+        selected_category = self.vis_category_combo.currentText()
+        if selected_category in vis_category_configs:
+            # 更新可视化类型下拉框
+            self.vis_type_combo.blockSignals(True)
+            self.vis_type_combo.clear()
+            self.vis_type_combo.addItems(vis_category_configs[selected_category])
+            self.vis_type_combo.blockSignals(False)
+            
+            logger.info(f"可视化分类 '{selected_category}' 已选择，可用类型: {vis_category_configs[selected_category]}")
+    
+    def on_function_selected(self, index):
+        """处理功能选择改变，自动配置模型类别、模型类型和训练方法"""
+        if index == 0:  # "请选择功能"
+            return
+        
+        # 功能到模型配置的映射
+        function_configs = {
+            "行为克隆功能": {
+                "category": "基础算法模型",
+                "model_type": "BehaviorCloner",
+                "training_method": "standard"
+            },
+            "对抗模仿学习功能": {
+                "category": "基础算法模型",
+                "model_type": "AdversarialImitationLearner",
+                "training_method": "standard"
+            },
+            "离线强化学习功能": {
+                "category": "基础算法模型",
+                "model_type": "OfflineRLearner",
+                "training_method": "standard"
+            },
+            "离线自对弈功能": {
+                "category": "基础算法模型",
+                "model_type": "OfflineFSPLearner",
+                "training_method": "standard"
+            },
+            "基于自编码器的轨迹建模功能": {
+                "category": "轨迹建模与生成模型",
+                "model_type": "AutoencoderModel",
+                "training_method": "standard"
+            },
+            "基于Transformer网络的轨迹建模功能": {
+                "category": "轨迹建模与生成模型",
+                "model_type": "TransformerModel",
+                "training_method": "standard"
+            },
+            "基于扩散模型的轨迹生成功能": {
+                "category": "轨迹建模与生成模型",
+                "model_type": "DiffusionTrajGenerator",
+                "training_method": "standard"
+            },
+            "基于变分自编码器的轨迹生成功能": {
+                "category": "轨迹建模与生成模型",
+                "model_type": "VAETrajGenerator",
+                "training_method": "standard"
+            },
+            "进化学习功能": {
+                "category": "训练方法模型",
+                "model_type": "TransformerModel",
+                "training_method": "evolutionary"
+            },
+            "增量学习功能": {
+                "category": "训练方法模型",
+                "model_type": "TransformerModel",
+                "training_method": "incremental"
+            },
+            "策略生成模型的少样本微调功能": {
+                "category": "训练方法模型",
+                "model_type": "TransformerModel",
+                "training_method": "fine_tune"
+            }
+        }
+        
+        selected_function = self.function_combo.currentText()
+        if selected_function in function_configs:
+            config = function_configs[selected_function]
+            
+            # 临时断开信号连接，避免触发更新
+            self.model_category_combo.blockSignals(True)
+            self.model_type_combo.blockSignals(True)
+            self.training_method_combo.blockSignals(True)
+            
+            # 设置模型类别
+            category_index = self.model_category_combo.findText(config["category"])
+            if category_index >= 0:
+                self.model_category_combo.setCurrentIndex(category_index)
+            
+            # 更新模型类型下拉框（这会触发update_model_combobox）
+            self.update_model_combobox()
+            
+            # 设置模型类型
+            model_type_index = self.model_type_combo.findText(config["model_type"])
+            if model_type_index >= 0:
+                self.model_type_combo.setCurrentIndex(model_type_index)
+            
+            # 设置训练方法
+            training_method_index = self.training_method_combo.findText(config["training_method"])
+            if training_method_index >= 0:
+                self.training_method_combo.setCurrentIndex(training_method_index)
+            
+            # 恢复信号连接
+            self.model_category_combo.blockSignals(False)
+            self.model_type_combo.blockSignals(False)
+            self.training_method_combo.blockSignals(False)
+            
+            logger.info(f"功能选择 '{selected_function}' 已自动配置: {config}")
     
     def load_data(self, data_type):
         """加载数据"""
@@ -762,6 +986,93 @@ class MainWindow(QMainWindow):
             error_traceback = traceback.format_exc()
             QMessageBox.critical(self, "错误", f"数据预处理失败: {str(e)}")
             logger.error(f"数据预处理失败: {str(e)}\n{error_traceback}")
+
+    def preprocess_and_enhance_data(self):
+        """预处理数据"""
+        try:
+            if self.training_data is None:
+                QMessageBox.warning(self, "警告", "请先加载训练数据")
+                return
+            
+            # 获取预处理配置
+            preprocess_config = {
+                'outlier_threshold': self.outlier_threshold.value(),
+                'alignment_mode': self.alignment_mode.currentText(),
+                'normalize': self.normalize_check.isChecked()
+            }
+            
+            # 预处理数据（DataPreprocessor.load_data 将把列表转为np.array并校验）
+            self.processed_data = self.api.preprocess_data(self.training_data, preprocess_config, enhance=True)
+            
+            # 更新状态
+            self.preprocess_status.setText("已处理")
+            self.data_info_text.append("数据预处理完成")
+            self.statusBar().showMessage("数据预处理完成")
+            logger.info("数据预处理完成")
+            
+            # 分割数据为训练集和测试集 (80%训练, 20%测试)
+            if self.processed_data and "trajectories" in self.processed_data:
+                import json
+                import os
+                import numpy as np
+
+                def to_serializable(x):
+                    import numpy as _np
+                    if isinstance(x, _np.ndarray):
+                        return x.tolist()
+                    if isinstance(x, (_np.floating,)):
+                        return float(x)
+                    if isinstance(x, (_np.integer,)):
+                        return int(x)
+                    if isinstance(x, dict):
+                        return {k: to_serializable(v) for k, v in x.items()}
+                    if isinstance(x, (list, tuple)):
+                        return [to_serializable(v) for v in x]
+                    return x
+                
+                trajectories = self.processed_data["trajectories"]
+                # 随机打乱并切分
+                indices = np.arange(len(trajectories))
+                np.random.shuffle(indices)
+                split_index = int(0.8 * len(indices))
+                train_indices = indices[:split_index]
+                test_indices = indices[split_index:]
+                train_trajectories = [trajectories[i] for i in train_indices]
+                test_trajectories = [trajectories[i] for i in test_indices]
+                
+                # 保存训练集和测试集（将ndarray安全转换为list）
+                data_dir = "data"
+                os.makedirs(data_dir, exist_ok=True)
+                
+                train_path = os.path.join(data_dir, "train_data_enhanced.json")
+                test_path = os.path.join(data_dir, "test_data_enhanced.json")
+                
+                with open(train_path, 'w', encoding='utf-8') as f:
+                    json.dump({
+                        "data": to_serializable(train_trajectories),
+                        "state_dim": to_serializable(self.processed_data.get("state_dim", ())),
+                        "action_dim": int(self.processed_data.get("action_dim", 0)),
+                        "traj_length": int(self.processed_data.get("traj_length", 0))
+                    }, f, ensure_ascii=False, indent=2)
+                    
+                with open(test_path, 'w', encoding='utf-8') as f:
+                    json.dump({
+                        "data": to_serializable(test_trajectories),
+                        "state_dim": to_serializable(self.processed_data.get("state_dim", ())),
+                        "action_dim": int(self.processed_data.get("action_dim", 0)),
+                        "traj_length": int(self.processed_data.get("traj_length", 0))
+                    }, f, ensure_ascii=False, indent=2)
+                    
+                logger.info(f"训练集和测试集已保存至: {data_dir}")
+                self.statusBar().showMessage(f"数据已分割并保存至{data_dir}")
+                self.data_info_text.append(f"训练集大小: {len(train_trajectories)}条轨迹")
+                self.data_info_text.append(f"测试集大小: {len(test_trajectories)}条轨迹")
+            
+        except Exception as e:
+            import traceback
+            error_traceback = traceback.format_exc()
+            QMessageBox.critical(self, "错误", f"数据预处理失败: {str(e)}")
+            logger.error(f"数据预处理失败: {str(e)}\n{error_traceback}")
     
     def load_training_data(self):
         """加载训练数据"""
@@ -833,7 +1144,8 @@ class MainWindow(QMainWindow):
             timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
             save_dir = "models"
             os.makedirs(save_dir, exist_ok=True)
-            default_model_file = f"{model_type}_{timestamp}.pt"
+            # default_model_file = f"{model_type}_{timestamp}.pt"
+            default_model_file = f"{model_type}.pt"
             save_path = os.path.join(save_dir, default_model_file)
 
             model_config = {
@@ -1120,9 +1432,17 @@ class MainWindow(QMainWindow):
     def generate_visualization(self):
         """生成可视化"""
         try:
-                        
+            # 检查是否选择了可视化分类
+            if self.vis_category_combo.currentIndex() == 0:
+                QMessageBox.warning(self, "警告", "请先选择可视化分类")
+                return
+            
             # 获取可视化类型
             vis_type = self.vis_type_combo.currentText()
+            
+            if not vis_type:
+                QMessageBox.warning(self, "警告", "请先选择可视化类型")
+                return
             
             if self.current_model is None and self.eval_results_text.toPlainText() == "" and vis_type not in ["3d", "trajectory", "traj_heatmap"]:
                 QMessageBox.warning(self, "警告", "请先训练或评估模型以获取可视化数据")
@@ -1743,13 +2063,23 @@ if __name__ == "__main__":
         print("设置应用程序样式...")
         app.setStyle("Fusion")
         
-        # 创建主窗口
-        print("创建主窗口...")
-        window = MainWindow()
-        
-        # 显示主窗口
-        print("显示主窗口...")
-        window.show()
+        # 显示模块选择界面（引导界面）
+        print("显示模块选择界面...")
+        selection_dialog = ModuleSelectionDialog()
+        if selection_dialog.exec_() == QDialog.Accepted:
+            selected_module = getattr(selection_dialog, 'selected_module', None)
+            if selected_module:
+                logger.info(f"模块选择: {selected_module}")
+                print(f"模块选择: {selected_module}")
+            # 创建主窗口
+            print("创建主窗口...")
+            window = MainWindow()
+            # 显示主窗口
+            print("显示主窗口...")
+            window.show()
+        else:
+            print("用户取消模块选择，退出应用。")
+            sys.exit(0)
         
         # 运行应用程序
         print("启动应用程序主循环...")

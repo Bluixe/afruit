@@ -5,6 +5,8 @@ import numpy as np
 import torch
 from typing import Dict, List, Tuple, Union, Optional, Any
 
+from loguru import logger
+
 # 添加项目根目录到系统路径
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -273,7 +275,7 @@ class AlgorithmAPI:
             self.logger.error(f"数据加载失败: {str(e)}")
             raise
     
-    def preprocess_data(self, raw_data: Dict, preprocess_config: Dict = None) -> Dict:
+    def preprocess_data(self, raw_data: Dict, preprocess_config: Dict = None, enhance: bool = False) -> Dict:
         """
         预处理数据
         - 若输入为轨迹数据字典(含trajectories)，则按轨迹路径进行处理(更贴近训练数据管线)
@@ -284,6 +286,7 @@ class AlgorithmAPI:
         try:
             # 轨迹结构路径
             if isinstance(raw_data, dict) and 'trajectories' in raw_data:
+                logger.info("检测到轨迹数据路径，使用轨迹预处理器")
                 # 标准化轨迹数据形状/类型
                 processed = self.data_preprocessor.load_data(raw_data)
 
@@ -297,6 +300,61 @@ class AlgorithmAPI:
                         feature_ranges=preprocess_config.get('feature_ranges', None)
                     )
                     self.logger.info("轨迹数据标准化完成")
+
+                # 数据增强：若开启enhance，则进行非常简单的增强（xyz反转/微小扰动）
+                if enhance:
+                    try:
+                        trajs = processed.get('trajectories', [])
+                        aug_trajs = []
+
+                        # 若已做zscore标准化，读取std用于尺度自适应噪声
+                        norm_stats = processed.get('norm_stats', {})
+                        std_vec = None
+                        if isinstance(norm_stats, dict) and norm_stats.get('type') == 'zscore':
+                            std_vec = norm_stats.get('std', None)
+
+                        # 噪声强度（默认极小，可由preprocess_config覆盖）
+                        noise_scale = float(preprocess_config.get('enhance_noise_scale', 0.01))
+
+                        for tr in trajs:
+                            if not isinstance(tr, dict) or 'states' not in tr or not isinstance(tr['states'], np.ndarray):
+                                continue
+                            states = tr['states']
+                            if states.ndim != 2 or states.shape[0] == 0:
+                                continue
+                            T, D = states.shape
+
+                            # 1) 轴反转增强：若至少3维，认为前3维是x,y,z，取负号
+                            flip_tr = {k: (v.copy() if isinstance(v, np.ndarray) else v) for k, v in tr.items()}
+                            if D >= 3:
+                                flip_tr['states'][:, :3] = -flip_tr['states'][:, :3]
+                                if 'next_states' in flip_tr and isinstance(flip_tr['next_states'], np.ndarray) and flip_tr['next_states'].ndim == 2 and flip_tr['next_states'].shape[1] >= 3:
+                                    flip_tr['next_states'][:, :3] = -flip_tr['next_states'][:, :3]
+                            aug_trajs.append(flip_tr)
+
+                            # 2) 微小高斯扰动增强
+                            noise_tr = {k: (v.copy() if isinstance(v, np.ndarray) else v) for k, v in tr.items()}
+                            if std_vec is not None and isinstance(std_vec, np.ndarray) and std_vec.shape[0] == D:
+                                noise = np.random.normal(0.0, noise_scale, size=(T, D)) * std_vec.reshape(1, -1)
+                            else:
+                                noise = np.random.normal(0.0, noise_scale, size=(T, D))
+                            noise_tr['states'] = noise_tr['states'] + noise
+                            if 'next_states' in noise_tr and isinstance(noise_tr['next_states'], np.ndarray) and noise_tr['next_states'].shape == (T, D):
+                                noise_next = np.random.normal(0.0, noise_scale, size=(T, D))
+                                if std_vec is not None and isinstance(std_vec, np.ndarray) and std_vec.shape[0] == D:
+                                    noise_next = noise_next * std_vec.reshape(1, -1)
+                                noise_tr['next_states'] = noise_tr['next_states'] + noise_next
+                            aug_trajs.append(noise_tr)
+
+                        if len(aug_trajs) > 0:
+                            processed['trajectories'].extend(aug_trajs)
+                            if 'num_trajectories' in processed:
+                                processed['num_trajectories'] = len(processed['trajectories'])
+                            self.logger.info(f"数据增强完成：新增{len(aug_trajs)}条增强轨迹，总数={len(processed['trajectories'])}")
+                        else:
+                            self.logger.info("数据增强开启，但无可增强轨迹，已跳过")
+                    except Exception as e:
+                        self.logger.warning(f"数据增强阶段发生异常，已跳过增强: {e}")
 
                 self.logger.info("轨迹数据预处理完成")
                 return processed

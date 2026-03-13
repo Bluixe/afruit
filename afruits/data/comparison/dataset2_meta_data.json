@@ -1,0 +1,10 @@
+{
+  "state_dim": [
+    18
+  ],
+  "action_dim": 45,
+  "traj_length": 100,
+  "format": "npy",
+  "scenario": "扩展多机协同空战场景",
+  "description": "扩展状态空间的空战轨迹数据，包含相对位置、速度、能量等扩展特征，适用于多机协同场景"
+}
